@@ -25,6 +25,7 @@ export default function App() {
   const [compileModelRotation, setCompileModelRotation] = useState<
     [number, number, number]
   >([0, 0, 0]);
+  const [compileModelColor, setCompileModelColor] = useState("#b5b5b5");
   const [latestCompileJobId, setLatestCompileJobId] = useState<string | null>(null);
 
   const apiBase = useMemo(
@@ -62,6 +63,21 @@ export default function App() {
     void loadModelMeta();
   }, [apiBase]);
 
+  const extractColorHintFromScad = (scad?: string) => {
+    if (!scad) {
+      return null;
+    }
+    const quoted = scad.match(/color\s*\(\s*"([^"]+)"\s*\)/i);
+    if (quoted?.[1]) {
+      return quoted[1];
+    }
+    const hex = scad.match(/color\s*\(\s*(#[0-9a-fA-F]{3,8})\s*\)/i);
+    if (hex?.[1]) {
+      return hex[1];
+    }
+    return null;
+  };
+
   const pollCompileJob = async (jobId: string) => {
     setCompileStatus("queued");
     const terminalStates = new Set(["completed", "failed", "cancelled"]);
@@ -77,14 +93,18 @@ export default function App() {
         output?: {
           preview_url?: string | null;
           stl_url?: string | null;
+          model_3mf_url?: string | null;
           orientation?: { mesh_rotation_euler?: [number, number, number] };
         };
       };
       setCompileStatus(body.status);
       if (body.output?.preview_url) {
-        setCompilePreviewUrl(`${apiBase}${body.output.preview_url}?t=${Date.now()}`);
+        const previewUrl = `${apiBase}${body.output.preview_url}?t=${Date.now()}`;
+        setCompilePreviewUrl(previewUrl);
       }
-      if (body.output?.stl_url) {
+      if (body.output?.model_3mf_url) {
+        setCompileModelUrl(`${apiBase}${body.output.model_3mf_url}?t=${Date.now()}`);
+      } else if (body.output?.stl_url) {
         setCompileModelUrl(`${apiBase}${body.output.stl_url}?t=${Date.now()}`);
       }
       if (body.output?.orientation?.mesh_rotation_euler) {
@@ -164,6 +184,10 @@ export default function App() {
 
       setProvider(data.provider);
       setModel(data.model);
+      const colorHint = extractColorHintFromScad(data.updated_code);
+      if (colorHint) {
+        setCompileModelColor(colorHint);
+      }
       const changeSuffix = data.code_change_applied
         ? `\n\n[Applied ${data.code_change_mode ?? "change"} to current CAD code.]`
         : "";
@@ -194,7 +218,11 @@ export default function App() {
   return (
     <main className="app-shell">
       <section className="viewport-pane">
-        <ViewportCanvas modelUrl={compileModelUrl} modelRotationEuler={compileModelRotation} />
+        <ViewportCanvas
+          modelUrl={compileModelUrl}
+          modelRotationEuler={compileModelRotation}
+          modelColor={compileModelColor}
+        />
       </section>
 
       <aside className="chat-panel">
@@ -227,6 +255,7 @@ export default function App() {
             Rotation: [{compileModelRotation[0].toFixed(3)}, {compileModelRotation[1].toFixed(3)}
             , {compileModelRotation[2].toFixed(3)}]
           </div>
+          <div className="compile-debug-rotation">Color: {compileModelColor}</div>
           {compilePreviewUrl ? (
             <img src={compilePreviewUrl} className="compile-preview" alt="compile preview" />
           ) : null}

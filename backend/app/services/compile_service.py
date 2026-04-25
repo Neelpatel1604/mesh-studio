@@ -54,6 +54,7 @@ class CompileService:
             tmp_path = Path(tmp_dir)
             scad_path = tmp_path / "model.scad"
             stl_path = tmp_path / "model.stl"
+            three_mf_path = tmp_path / "model.3mf"
             preview_path = tmp_path / "preview.png"
             scad_path.write_text(source_code, encoding="utf-8")
 
@@ -103,6 +104,31 @@ class CompileService:
                 )
                 return
 
+            three_mf_process = self._spawn_openscad_process(
+                [
+                    settings.openscad_bin,
+                    "-o",
+                    str(three_mf_path),
+                    str(scad_path),
+                ]
+            )
+            if isinstance(three_mf_process, Exception):
+                warnings = [f"3MF generation skipped: {three_mf_process}"]
+            else:
+                warnings = []
+                self._set_process(job_id, three_mf_process)
+                try:
+                    _, three_mf_stderr = three_mf_process.communicate(
+                        timeout=settings.compile_timeout_sec
+                    )
+                    if three_mf_process.returncode != 0 and three_mf_stderr.strip():
+                        warnings.append(f"3MF generation warning: {three_mf_stderr.strip()}")
+                except subprocess.TimeoutExpired:
+                    three_mf_process.kill()
+                    warnings.append("3MF generation timed out.")
+                finally:
+                    self._clear_process(job_id)
+
             png_process = self._spawn_openscad_process(
                 [
                     settings.openscad_bin,
@@ -116,7 +142,6 @@ class CompileService:
                 ]
             )
             preview_generated = False
-            warnings: list[str] = []
             if isinstance(png_process, Exception):
                 warnings.append(f"Preview generation skipped: {png_process}")
             else:
@@ -139,14 +164,17 @@ class CompileService:
             output = {
                 "engine": "openscad-cli",
                 "stl_generated": False,
+                "model_3mf_generated": False,
                 "preview_generated": preview_generated,
                 "stl_path": None,
+                "model_3mf_path": None,
                 "preview_path": None,
                 "stl_url": None,
+                "model_3mf_url": None,
                 "preview_url": None,
                 "orientation": {
                     "up_axis": "z",
-                    "mesh_rotation_euler": [0.0, 0.0, 0.0],
+                    "mesh_rotation_euler": [-1.57079632679, 0.0, 0.0],
                 },
             }
             job_artifacts_dir = self._artifacts_root / job_id
@@ -157,6 +185,12 @@ class CompileService:
                 output["stl_generated"] = True
                 output["stl_path"] = str(final_stl)
                 output["stl_url"] = f"/artifacts/{job_id}/model.stl"
+            if three_mf_path.exists():
+                final_3mf = job_artifacts_dir / "model.3mf"
+                shutil.copy2(three_mf_path, final_3mf)
+                output["model_3mf_generated"] = True
+                output["model_3mf_path"] = str(final_3mf)
+                output["model_3mf_url"] = f"/artifacts/{job_id}/model.3mf"
             if preview_generated and preview_path.exists():
                 final_preview = job_artifacts_dir / "preview.png"
                 shutil.copy2(preview_path, final_preview)
