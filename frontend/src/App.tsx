@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { EditorViewportCanvas } from "./components/viewport/EditorViewportCanvas";
 import { DisplayControls } from "./components/ui/DisplayControls";
-import { DisplayMode, EditorTool, MeasureSubtool, PersistedEditorState, Unit } from "./components/viewport/editorTypes";
+import { DisplayMode, DotDensityMode, EditorTool, MeasureSubtool, PersistedEditorState, Unit } from "./components/viewport/editorTypes";
 
 type ChatRole = "user" | "assistant";
 type ChatEntry = { role: ChatRole; content: string };
@@ -43,6 +43,7 @@ export default function App() {
   const [activeTool, setActiveTool] = useState<EditorTool>("orbit");
   const [measurementUnit, setMeasurementUnit] = useState<Unit>("mm");
   const [displayMode, setDisplayMode] = useState<DisplayMode>("solid");
+  const [dotDensityMode, setDotDensityMode] = useState<DotDensityMode>("dense");
   const [measureSubtool, setMeasureSubtool] = useState<MeasureSubtool>("bounding_dimensions");
   const [editorState, setEditorState] = useState<EditorStatePayload | null>(null);
   const [clearMeasureNonce, setClearMeasureNonce] = useState(0);
@@ -95,6 +96,7 @@ export default function App() {
         setActiveTool(data.active_tool ?? (data.mode as EditorTool) ?? "orbit");
         setMeasurementUnit(data.unit);
         setDisplayMode(data.display_mode ?? "solid");
+        setDotDensityMode(data.dot_density_mode ?? "dense");
         setMeasureSubtool(data.measure_subtool ?? "bounding_dimensions");
       } catch {
         // Editor endpoints might not exist yet during local startup.
@@ -306,8 +308,10 @@ export default function App() {
           <span className="toolbar-divider" />
           <DisplayControls
             displayMode={displayMode}
+            dotDensityMode={dotDensityMode}
             measureSubtool={measureSubtool}
             onDisplayModeChange={setDisplayMode}
+            onDotDensityModeChange={setDotDensityMode}
             onMeasureSubtoolChange={setMeasureSubtool}
           />
           <span className="toolbar-divider" />
@@ -336,6 +340,7 @@ export default function App() {
           activeTool={activeTool}
           unit={measurementUnit}
           displayMode={displayMode}
+          dotDensityMode={dotDensityMode}
           measureSubtool={measureSubtool}
           persistedEditorState={editorState}
           onEditorStateChange={handleEditorStateChange}

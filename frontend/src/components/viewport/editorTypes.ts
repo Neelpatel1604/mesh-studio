@@ -1,6 +1,7 @@
 export type EditorTool = "orbit" | "edit" | "measure";
 export type MeasureSubtool = "bounding_dimensions" | "point_to_point";
 export type DisplayMode = "solid" | "wireframe" | "solid_wire";
+export type DotDensityMode = "all" | "sampled" | "adaptive" | "dense";
 export type Unit = "mm" | "cm" | "in";
 
 export type BoundsInfo = {
@@ -22,6 +23,7 @@ export type PersistedEditorState = {
   active_tool?: EditorTool;
   unit: Unit;
   display_mode?: DisplayMode;
+  dot_density_mode?: DotDensityMode;
   measure_subtool?: MeasureSubtool;
   snap_enabled?: boolean;
   selected_control_point: EditorControlPoint;

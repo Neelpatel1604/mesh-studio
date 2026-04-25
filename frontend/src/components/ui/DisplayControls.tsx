@@ -1,16 +1,20 @@
-import { DisplayMode, MeasureSubtool } from "../viewport/editorTypes";
+import { DisplayMode, DotDensityMode, MeasureSubtool } from "../viewport/editorTypes";
 
 type DisplayControlsProps = {
   displayMode: DisplayMode;
+  dotDensityMode: DotDensityMode;
   measureSubtool: MeasureSubtool;
   onDisplayModeChange: (value: DisplayMode) => void;
+  onDotDensityModeChange: (value: DotDensityMode) => void;
   onMeasureSubtoolChange: (value: MeasureSubtool) => void;
 };
 
 export function DisplayControls({
   displayMode,
+  dotDensityMode,
   measureSubtool,
   onDisplayModeChange,
+  onDotDensityModeChange,
   onMeasureSubtoolChange,
 }: DisplayControlsProps) {
   return (
@@ -24,6 +28,17 @@ export function DisplayControls({
         <option value="solid">Solid</option>
         <option value="wireframe">Wireframe</option>
         <option value="solid_wire">Solid+Wire</option>
+      </select>
+      <select
+        className="toolbar-unit-select"
+        value={dotDensityMode}
+        onChange={(event) => onDotDensityModeChange(event.target.value as DotDensityMode)}
+        aria-label="Dot density mode"
+      >
+        <option value="dense">Dots: Dense</option>
+        <option value="all">Dots: All</option>
+        <option value="sampled">Dots: Sampled</option>
+        <option value="adaptive">Dots: Adaptive</option>
       </select>
       <select
         className="toolbar-unit-select"
