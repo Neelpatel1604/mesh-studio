@@ -1,4 +1,5 @@
 import { DisplayMode, DotDensityMode, MeasureSubtool } from "../viewport/editorTypes";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
 type DisplayControlsProps = {
   displayMode: DisplayMode;
@@ -19,36 +20,42 @@ export function DisplayControls({
 }: DisplayControlsProps) {
   return (
     <>
-      <select
-        className="toolbar-unit-select"
-        value={displayMode}
-        onChange={(event) => onDisplayModeChange(event.target.value as DisplayMode)}
-        aria-label="Display mode"
-      >
-        <option value="solid">Solid</option>
-        <option value="wireframe">Wireframe</option>
-        <option value="solid_wire">Solid+Wire</option>
-      </select>
-      <select
-        className="toolbar-unit-select"
-        value={dotDensityMode}
-        onChange={(event) => onDotDensityModeChange(event.target.value as DotDensityMode)}
-        aria-label="Dot density mode"
-      >
-        <option value="dense">Dots: Dense</option>
-        <option value="all">Dots: All</option>
-        <option value="sampled">Dots: Sampled</option>
-        <option value="adaptive">Dots: Adaptive</option>
-      </select>
-      <select
-        className="toolbar-unit-select"
-        value={measureSubtool}
-        onChange={(event) => onMeasureSubtoolChange(event.target.value as MeasureSubtool)}
-        aria-label="Measure subtool"
-      >
-        <option value="bounding_dimensions">Measure: Bounds</option>
-        <option value="point_to_point">Measure: Points</option>
-      </select>
+      <Select value={displayMode} onValueChange={(value: string) => onDisplayModeChange(value as DisplayMode)}>
+        <SelectTrigger aria-label="Display mode">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectItem value="solid">Solid</SelectItem>
+            <SelectItem value="wireframe">Wireframe</SelectItem>
+            <SelectItem value="solid_wire">Solid+Wire</SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      <Select value={dotDensityMode} onValueChange={(value: string) => onDotDensityModeChange(value as DotDensityMode)}>
+        <SelectTrigger aria-label="Dot density mode">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectItem value="dense">Dots: Dense</SelectItem>
+            <SelectItem value="all">Dots: All</SelectItem>
+            <SelectItem value="sampled">Dots: Sampled</SelectItem>
+            <SelectItem value="adaptive">Dots: Adaptive</SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      <Select value={measureSubtool} onValueChange={(value: string) => onMeasureSubtoolChange(value as MeasureSubtool)}>
+        <SelectTrigger aria-label="Measure subtool">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectItem value="bounding_dimensions">Measure: Bounds</SelectItem>
+            <SelectItem value="point_to_point">Measure: Points</SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>
     </>
   );
 }
