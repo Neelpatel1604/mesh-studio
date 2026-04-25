@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     default_provider: str = "gemini"
     cors_allow_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     gemini_api_key: str = ""
+    google_vision_api_key: str = ""
+    image_to_3d_provider: str = "mock"
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"
     openscad_bin: str = "openscad"
     compile_timeout_sec: int = 900
 

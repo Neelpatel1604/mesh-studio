@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Mic, Square } from "lucide-react";
 import { EditorViewportCanvas } from "./components/viewport/EditorViewportCanvas";
 import { DisplayControls } from "./components/ui/DisplayControls";
 import { DisplayMode, DotDensityMode, EditorTool, MeasureSubtool, PersistedEditorState, Unit } from "./components/viewport/editorTypes";
@@ -17,6 +18,32 @@ type EditorStatePayload = PersistedEditorState & {
   measurement_points: Vec3[];
 };
 
+type SpeechRecognitionResultEvent = Event & {
+  results: {
+    [index: number]: {
+      [index: number]: {
+        transcript: string;
+      };
+      isFinal: boolean;
+      length: number;
+    };
+    length: number;
+  };
+};
+
+type SpeechRecognitionInstance = {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: SpeechRecognitionResultEvent) => void) | null;
+  onerror: ((event: Event & { error?: string; message?: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
+
 const DEFAULT_SESSION_ID = "default";
 
 export default function App() {
@@ -31,6 +58,9 @@ export default function App() {
   const [provider, setProvider] = useState("gemini");
   const [model, setModel] = useState("gemini-2.5-pro");
   const [isSending, setIsSending] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [compileStatus, setCompileStatus] = useState<string | null>(null);
   const [compilePreviewUrl, setCompilePreviewUrl] = useState<string | null>(null);
@@ -48,6 +78,7 @@ export default function App() {
   const [editorState, setEditorState] = useState<EditorStatePayload | null>(null);
   const [clearMeasureNonce, setClearMeasureNonce] = useState(0);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
   const apiBase = useMemo(
     () => process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000",
@@ -186,10 +217,20 @@ export default function App() {
   };
 
   useEffect(() => {
+    const maybeWindow = window as Window & {
+      SpeechRecognition?: SpeechRecognitionCtor;
+      webkitSpeechRecognition?: SpeechRecognitionCtor;
+    };
+    const RecognitionCtor = maybeWindow.SpeechRecognition ?? maybeWindow.webkitSpeechRecognition;
+    setSpeechSupported(Boolean(RecognitionCtor));
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (autosaveTimerRef.current) {
         clearTimeout(autosaveTimerRef.current);
       }
+      recognitionRef.current?.stop();
     };
   }, []);
 
@@ -280,6 +321,115 @@ export default function App() {
     }
   };
 
+  const handleSpeakLatestReply = async () => {
+    if (isSpeaking) {
+      return;
+    }
+    const lastAssistantMessage = [...messages]
+      .reverse()
+      .find((entry) => entry.role === "assistant" && entry.content.trim().length > 0);
+    if (!lastAssistantMessage) {
+      setError("No assistant reply available to narrate yet.");
+      return;
+    }
+    setIsSpeaking(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/ai/speak`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: lastAssistantMessage.content.slice(0, 1400),
+        }),
+      });
+      if (!response.ok) {
+        let detail = "";
+        try {
+          const errorBody = (await response.json()) as { detail?: string };
+          detail = errorBody.detail ? `: ${errorBody.detail}` : "";
+        } catch {
+          // Ignore non-JSON error body.
+        }
+        throw new Error(`Speech generation failed with status ${response.status}${detail}`);
+      }
+      const audioBlob = await response.blob();
+      const objectUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(objectUrl);
+      audio.onended = () => URL.revokeObjectURL(objectUrl);
+      void audio.play();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown speech generation error";
+      setError(message);
+    } finally {
+      setIsSpeaking(false);
+    }
+  };
+
+  const handleToggleMic = async () => {
+    const maybeWindow = window as Window & {
+      SpeechRecognition?: SpeechRecognitionCtor;
+      webkitSpeechRecognition?: SpeechRecognitionCtor;
+    };
+    const RecognitionCtor = maybeWindow.SpeechRecognition ?? maybeWindow.webkitSpeechRecognition;
+    if (!RecognitionCtor) {
+      setError("Speech recognition is not supported in this browser.");
+      return;
+    }
+
+    if (recognitionRef.current && isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+
+    setError(null);
+    try {
+      if (!window.isSecureContext) {
+        throw new Error("Microphone needs a secure context (https or localhost).");
+      }
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("This browser does not expose microphone APIs.");
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Microphone permission failed.";
+      setError(`Mic unavailable: ${message}`);
+      return;
+    }
+
+    const recognition = new RecognitionCtor();
+    recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.onresult = (event) => {
+      let transcript = "";
+      for (let i = 0; i < event.results.length; i += 1) {
+        transcript += event.results[i][0].transcript;
+      }
+      setDraft(transcript.trimStart());
+    };
+    recognition.onerror = (event) => {
+      const reason = event.error ? ` (${event.error})` : "";
+      setError(`Mic input failed${reason}. Try Chrome/Edge on localhost and allow microphone.`);
+      setIsListening(false);
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognitionRef.current = recognition;
+    setIsListening(true);
+    try {
+      recognition.start();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to start speech recognition.";
+      setError(`Mic input failed: ${message}`);
+      setIsListening(false);
+      recognitionRef.current = null;
+    }
+  };
+
   return (
     <main className="app-shell">
       <section className="viewport-pane">
@@ -359,6 +509,15 @@ export default function App() {
           >
             Refresh
           </button>
+          <button
+            type="button"
+            className="chat-refresh"
+            onClick={handleSpeakLatestReply}
+            disabled={isSpeaking || isSending}
+            title="Narrate latest assistant message"
+          >
+            {isSpeaking ? "Speaking..." : "Speak"}
+          </button>
           <span className="chat-badge">{`${provider} · ${model}`}</span>
         </header>
         <div className="chat-messages">
@@ -391,6 +550,20 @@ export default function App() {
             className="chat-input"
             disabled={isSending}
           />
+          <button
+            type="button"
+            className={`chat-mic-icon ${isListening ? "active" : ""}`}
+            onClick={() => void handleToggleMic()}
+            disabled={!speechSupported || isSending}
+            aria-label={isListening ? "Stop microphone input" : "Start microphone input"}
+            title={
+              speechSupported
+                ? "Use microphone to fill prompt"
+                : "Speech recognition is not supported in this browser"
+            }
+          >
+            {isListening ? <Square size={14} /> : <Mic size={14} />}
+          </button>
           <button type="submit" className="chat-send" disabled={isSending}>
             {isSending ? "Sending..." : "Send"}
           </button>

@@ -131,3 +131,42 @@ class AIService:
             await asyncio.sleep(0.02)
             yield f"event: chunk\ndata: {chunk}\n\n"
         yield "event: done\ndata: [DONE]\n\n"
+
+    async def text_to_speech(self, text: str, voice_id: str | None = None) -> bytes:
+        api_key = settings.elevenlabs_api_key.strip()
+        if not api_key:
+            raise RuntimeError("ELEVENLABS_API_KEY is missing in backend environment")
+        cleaned_text = text.strip()
+        if not cleaned_text:
+            raise RuntimeError("No text provided for text-to-speech")
+
+        selected_voice = (voice_id or settings.elevenlabs_voice_id).strip()
+        if not selected_voice:
+            raise RuntimeError("No ElevenLabs voice ID configured")
+
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{selected_voice}"
+        payload = {
+            "text": cleaned_text,
+            "model_id": "eleven_multilingual_v2",
+            "voice_settings": {
+                "stability": 0.45,
+                "similarity_boost": 0.75,
+            },
+        }
+        headers = {
+            "xi-api-key": api_key,
+            "accept": "audio/mpeg",
+            "content-type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            try:
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 401:
+                    raise RuntimeError(
+                        "ElevenLabs rejected the API key (401 Unauthorized). "
+                        "Check ELEVENLABS_API_KEY format and restart backend."
+                    ) from exc
+                raise
+            return response.content

@@ -5,7 +5,13 @@ from fastapi.responses import StreamingResponse
 from app.api.deps import ai_service, compile_service, session_service
 from app.schemas.compile import CompileRequest
 from app.services.code_change_service import apply_ai_code_change
-from app.schemas.ai import ChatRequest, ChatResponse, ModelListResponse, ProviderListResponse
+from app.schemas.ai import (
+    ChatRequest,
+    ChatResponse,
+    ModelListResponse,
+    ProviderListResponse,
+    TextToSpeechRequest,
+)
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -62,4 +68,20 @@ async def stream_chat(payload: ChatRequest) -> StreamingResponse:
     return StreamingResponse(
         ai_service.stream_chat(payload),
         media_type="text/event-stream",
+    )
+
+
+@router.post("/speak")
+async def speak(payload: TextToSpeechRequest) -> StreamingResponse:
+    try:
+        audio_bytes = await ai_service.text_to_speech(
+            text=payload.text,
+            voice_id=payload.voice_id,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return StreamingResponse(
+        iter([audio_bytes]),
+        media_type="audio/mpeg",
+        headers={"Content-Disposition": "inline; filename=ai-voice.mp3"},
     )
