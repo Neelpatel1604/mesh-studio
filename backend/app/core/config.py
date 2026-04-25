@@ -9,9 +9,13 @@ class Settings(BaseSettings):
     storage_dir: Path = Path(__file__).resolve().parents[2] / "storage"
     max_upload_mb: int = 10
     default_provider: str = "gemini"
+    cors_allow_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    gemini_api_key: str = ""
+    openscad_bin: str = "openscad"
+    compile_timeout_sec: int = 900
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "app/.env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )

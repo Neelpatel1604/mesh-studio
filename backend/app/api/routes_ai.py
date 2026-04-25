@@ -1,7 +1,10 @@
 from fastapi import APIRouter
+from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import ai_service
+from app.api.deps import ai_service, compile_service, session_service
+from app.schemas.compile import CompileRequest
+from app.services.code_change_service import apply_ai_code_change
 from app.schemas.ai import ChatRequest, ChatResponse, ModelListResponse, ProviderListResponse
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -19,9 +22,39 @@ def get_models(provider: str | None = None) -> ModelListResponse:
 
 
 @router.post("/chat", response_model=ChatResponse)
-def chat(payload: ChatRequest) -> ChatResponse:
-    provider, model, response = ai_service.chat(payload)
-    return ChatResponse(provider=provider, model=model, response=response)
+async def chat(payload: ChatRequest) -> ChatResponse:
+    try:
+        provider, model, response = await ai_service.chat(payload)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    session_doc = session_service.get(payload.session_id)
+    current_code = payload.current_code if payload.current_code is not None else session_doc.source_code
+    code_change = apply_ai_code_change(current_code=current_code, ai_text=response)
+
+    session_doc.source_code = code_change.updated_code
+    session_service.save(session_doc)
+
+    compile_job_id: str | None = None
+    compile_status: str | None = None
+    if code_change.applied:
+        compile_job_id = compile_service.create_job(
+            CompileRequest(source_code=code_change.updated_code)
+        )
+        compile_status = "queued"
+
+    return ChatResponse(
+        provider=provider,
+        model=model,
+        response=response,
+        updated_code=code_change.updated_code,
+        code_change_applied=code_change.applied,
+        code_change_mode=code_change.mode,
+        replacement_count=code_change.replacement_count,
+        code_change_error=code_change.error,
+        compile_job_id=compile_job_id,
+        compile_status=compile_status,
+    )
 
 
 @router.post("/chat/stream")
