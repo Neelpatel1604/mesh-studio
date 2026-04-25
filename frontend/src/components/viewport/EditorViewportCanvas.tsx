@@ -78,6 +78,7 @@ function EditableMeshPrimitive({
   const { camera, gl } = useThree();
   const raycasterRef = useRef(new Raycaster());
   const [selectedPoint, setSelectedPoint] = useState<[number, number, number] | null>(null);
+  const [hoveredPoint, setHoveredPoint] = useState<[number, number, number] | null>(null);
   const dragRef = useRef<{ mesh: Mesh | null; vid: number | null; start: Vector3; active: boolean; planeNormalPoint: Vector3 }>({
     mesh: null,
     vid: null,
@@ -85,6 +86,7 @@ function EditableMeshPrimitive({
     active: false,
     planeNormalPoint: new Vector3(),
   });
+  const linkedVertexIndicesRef = useRef<number[]>([]);
   const measureDownRef = useRef<{ x: number; y: number; point: [number, number, number] } | null>(null);
 
   useEffect(() => {
@@ -163,6 +165,12 @@ function EditableMeshPrimitive({
       pos.array[base] = local.x;
       pos.array[base + 1] = local.y;
       pos.array[base + 2] = local.z;
+      for (const linkedIdx of linkedVertexIndicesRef.current) {
+        const linkedBase = linkedIdx * 3;
+        pos.array[linkedBase] = local.x;
+        pos.array[linkedBase + 1] = local.y;
+        pos.array[linkedBase + 2] = local.z;
+      }
       pos.needsUpdate = true;
       geometry.computeVertexNormals();
       const world = mesh.localToWorld(local.clone());
@@ -177,6 +185,7 @@ function EditableMeshPrimitive({
       dragRef.current.active = false;
       dragRef.current.mesh = null;
       dragRef.current.vid = null;
+      linkedVertexIndicesRef.current = [];
       setInteractionOwner("camera");
       onDragDeltaChange(null);
       if (hadDrag) {
@@ -205,6 +214,17 @@ function EditableMeshPrimitive({
     setSelectedPoint([grp.x, grp.y, grp.z]);
     onSelectionChange({ id: `v:${nearest.index}`, position: [nearest.vertex.x, nearest.vertex.y, nearest.vertex.z] });
     dragRef.current = { mesh, vid: nearest.index, start: nearest.vertex.clone(), active: true, planeNormalPoint: world.clone() };
+    const linked: number[] = [];
+    const eps = 1e-6;
+    for (let i = 0; i < pos.count; i += 1) {
+      const dx = pos.array[i * 3] - nearest.vertex.x;
+      const dy = pos.array[i * 3 + 1] - nearest.vertex.y;
+      const dz = pos.array[i * 3 + 2] - nearest.vertex.z;
+      if (Math.abs(dx) < eps && Math.abs(dy) < eps && Math.abs(dz) < eps) {
+        linked.push(i);
+      }
+    }
+    linkedVertexIndicesRef.current = linked.length > 0 ? linked : [nearest.index];
     setInteractionOwner("tool");
     gl.domElement.style.cursor = "grabbing";
   };
@@ -214,8 +234,10 @@ function EditableMeshPrimitive({
       measureDownRef.current = { x: event.clientX, y: event.clientY, point: [event.point.x, event.point.y, event.point.z] };
       return;
     }
-    if (activeTool !== "move") return;
+    if (activeTool !== "edit") return;
+    if (displayMode !== "wireframe") return;
     event.stopPropagation();
+    setHoveredPoint(null);
 
     // Direct vertex grab from visible dot cloud (wireframe helper points).
     const pointsObject = event.object as Points;
@@ -257,14 +279,37 @@ function EditableMeshPrimitive({
           matrixAutoUpdate={false}
           frustumCulled={false}
           renderOrder={2}
+          onPointerMove={(event) => {
+            if (activeTool !== "edit" || typeof event.index !== "number") {
+              return;
+            }
+            const positions = overlay.geometry.getAttribute("position");
+            const i = event.index;
+            const localVertex = new Vector3(
+              positions.array[i * 3],
+              positions.array[i * 3 + 1],
+              positions.array[i * 3 + 2],
+            );
+            const groupSpace = localVertex.applyMatrix4(overlay.matrix);
+            setHoveredPoint([groupSpace.x, groupSpace.y, groupSpace.z]);
+          }}
+          onPointerOut={() => {
+            setHoveredPoint(null);
+          }}
         >
-          <pointsMaterial color="#ffd78e" size={0.5} sizeAttenuation />
+          <pointsMaterial color="#ffe3a8" size={0.7} sizeAttenuation />
         </points>
       ))}
-      {selectedPoint && activeTool === "move" ? (
+      {hoveredPoint && activeTool === "edit" && !selectedPoint ? (
+        <mesh position={hoveredPoint as Vector3Tuple}>
+          <sphereGeometry args={[0.68, 16, 16]} />
+          <meshStandardMaterial color="#ffd78e" emissive="#8a5c1b" />
+        </mesh>
+      ) : null}
+      {selectedPoint && activeTool === "edit" ? (
         <mesh position={selectedPoint as Vector3Tuple}>
-          <sphereGeometry args={[0.5, 16, 16]} />
-          <meshStandardMaterial color="#ffad4d" emissive="#6a3a00" />
+          <sphereGeometry args={[0.8, 18, 18]} />
+          <meshStandardMaterial color="#ffd060" emissive="#8a4b00" />
         </mesh>
       ) : null}
       {activeTool === "measure" && measureSubtool === "bounding_dimensions" ? (
@@ -356,7 +401,7 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
     const onKeyUp = (event: KeyboardEvent) => {
       if (event.code !== "Space") return;
       navOverrideRef.current = false;
-      if (activeTool === "move") setInteractionOwner("tool");
+      if (activeTool === "edit") setInteractionOwner("tool");
     };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
@@ -402,7 +447,7 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
         <div>Unit: {unit}</div>
         {bounds ? <div>Bounds: {formatLength(bounds.width, unit)} / {formatLength(bounds.height, unit)} / {formatLength(bounds.depth, unit)}</div> : null}
         {activeTool === "measure" ? <div>Measure mode: {measureSubtool === "point_to_point" ? "click two points" : "bounding dimensions"}</div> : null}
-        {activeTool === "move" ? <div>Editable points: {editablePointCount}</div> : null}
+        {activeTool === "edit" ? <div>Editable points: {editablePointCount}</div> : null}
         {pointDistanceLabel ? <div>Point distance: {pointDistanceLabel}</div> : null}
         {dragDelta ? <div>Move delta: {formatLength(Math.hypot(...dragDelta), unit)}</div> : null}
       </HudPanel>

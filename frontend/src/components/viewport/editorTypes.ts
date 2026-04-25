@@ -1,4 +1,4 @@
-export type EditorTool = "orbit" | "select" | "move" | "measure";
+export type EditorTool = "orbit" | "edit" | "measure";
 export type MeasureSubtool = "bounding_dimensions" | "point_to_point";
 export type DisplayMode = "solid" | "wireframe" | "solid_wire";
 export type Unit = "mm" | "cm" | "in";

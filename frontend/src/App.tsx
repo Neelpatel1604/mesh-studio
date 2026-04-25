@@ -291,17 +291,10 @@ export default function App() {
           </button>
           <button
             type="button"
-            className={`toolbar-btn toolbar-btn-text ${activeTool === "select" ? "active" : ""}`}
-            onClick={() => setActiveTool("select")}
+            className={`toolbar-btn toolbar-btn-text ${activeTool === "edit" ? "active" : ""}`}
+            onClick={() => setActiveTool("edit")}
           >
-            Select
-          </button>
-          <button
-            type="button"
-            className={`toolbar-btn toolbar-btn-text ${activeTool === "move" ? "active" : ""}`}
-            onClick={() => setActiveTool("move")}
-          >
-            Move
+            Edit
           </button>
           <button
             type="button"

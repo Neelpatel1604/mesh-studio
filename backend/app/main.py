@@ -30,6 +30,9 @@ app.include_router(uploads_router)
 artifacts_dir = Path(settings.storage_dir) / "compile_artifacts"
 artifacts_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/artifacts", StaticFiles(directory=artifacts_dir), name="artifacts")
+edited_dir = Path(settings.storage_dir) / "edited_meshes"
+edited_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/edited", StaticFiles(directory=edited_dir), name="edited")
 
 
 @app.get("/health")
