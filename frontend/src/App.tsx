@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Mic, Square } from "lucide-react";
 import { EditorViewportCanvas } from "./components/viewport/EditorViewportCanvas";
 import { DisplayControls } from "./components/ui/DisplayControls";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { DisplayMode, DotDensityMode, EditorTool, MeasureSubtool, PersistedEditorState, Unit } from "./components/viewport/editorTypes";
 
 type ChatRole = "user" | "assistant";
@@ -240,6 +241,11 @@ export default function App() {
 
   const handleExportMeshReady = (exporter: (() => Blob | null) | null) => {
     setExportEditedMesh(() => exporter);
+  };
+  const handleLoadPrebuiltModel = () => {
+    setCompileModelUrl(`/premade/cube.stl?t=${Date.now()}`);
+    setCompileStatus("loaded prebuilt model");
+    setError(null);
   };
 
   useEffect(() => {
@@ -498,16 +504,27 @@ export default function App() {
           >
             Clear Measure
           </button>
-          <span className="toolbar-divider" />
-          <select
-            className="toolbar-unit-select"
-            value={measurementUnit}
-            onChange={(event) => setMeasurementUnit(event.target.value as Unit)}
+          <button
+            type="button"
+            className="toolbar-btn toolbar-btn-text"
+            onClick={handleLoadPrebuiltModel}
+            title="Load prebuilt cube model"
           >
-            <option value="mm">mm</option>
-            <option value="cm">cm</option>
-            <option value="in">in</option>
-          </select>
+            Load Prebuilt
+          </button>
+          <span className="toolbar-divider" />
+          <Select value={measurementUnit} onValueChange={(value: string) => setMeasurementUnit(value as Unit)}>
+            <SelectTrigger aria-label="Unit">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="mm">mm</SelectItem>
+                <SelectItem value="cm">cm</SelectItem>
+                <SelectItem value="in">in</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
           <span className="toolbar-spacer" />
           <button
             type="button"
