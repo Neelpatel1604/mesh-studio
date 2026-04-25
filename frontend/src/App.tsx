@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Mic, Square } from "lucide-react";
 import { EditorViewportCanvas } from "./components/viewport/EditorViewportCanvas";
 import { DisplayControls } from "./components/ui/DisplayControls";
@@ -9,6 +9,7 @@ import { DisplayMode, DotDensityMode, EditorTool, MeasureSubtool, PersistedEdito
 
 type ChatRole = "user" | "assistant";
 type ChatEntry = { role: ChatRole; content: string };
+type GenerationMode = "cad_edit" | "text_to_3d";
 type Vec3 = [number, number, number];
 type EditorControlPoint = {
   id: string;
@@ -58,6 +59,7 @@ export default function App() {
   ]);
   const [provider, setProvider] = useState("gemini");
   const [model, setModel] = useState("gemini-2.5-pro");
+  const [generationMode, setGenerationMode] = useState<GenerationMode>("cad_edit");
   const [isSending, setIsSending] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -81,6 +83,8 @@ export default function App() {
   const [clearMeasureNonce, setClearMeasureNonce] = useState(0);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const testFileInputRef = useRef<HTMLInputElement | null>(null);
+  const testModelObjectUrlRef = useRef<string | null>(null);
 
   const apiBase = useMemo(
     () => process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000",
@@ -239,13 +243,34 @@ export default function App() {
     }, 500);
   };
 
-  const handleExportMeshReady = (exporter: (() => Blob | null) | null) => {
+  const handleExportMeshReady = useCallback((exporter: (() => Blob | null) | null) => {
     setExportEditedMesh(() => exporter);
-  };
+  }, []);
   const handleLoadPrebuiltModel = () => {
     setCompileModelUrl(`/premade/cube.stl?t=${Date.now()}`);
     setCompileStatus("loaded prebuilt model");
     setError(null);
+  };
+
+  const handleLoadTestModel = () => {
+    testFileInputRef.current?.click();
+  };
+
+  const handleTestFilePicked = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    if (testModelObjectUrlRef.current) {
+      URL.revokeObjectURL(testModelObjectUrlRef.current);
+      testModelObjectUrlRef.current = null;
+    }
+    const objectUrl = URL.createObjectURL(file);
+    testModelObjectUrlRef.current = objectUrl;
+    setCompileModelUrl(objectUrl);
+    setCompileStatus(`loaded test model: ${file.name}`);
+    setError(null);
+    event.target.value = "";
   };
 
   useEffect(() => {
@@ -263,6 +288,10 @@ export default function App() {
         clearTimeout(autosaveTimerRef.current);
       }
       recognitionRef.current?.stop();
+      if (testModelObjectUrlRef.current) {
+        URL.revokeObjectURL(testModelObjectUrlRef.current);
+        testModelObjectUrlRef.current = null;
+      }
     };
   }, []);
 
@@ -288,6 +317,8 @@ export default function App() {
         },
         body: JSON.stringify({
           session_id: DEFAULT_SESSION_ID,
+          generation_mode: generationMode,
+          current_code: generationMode === "text_to_3d" ? null : undefined,
           provider,
           model,
           messages: nextMessages.map((msg) => ({
@@ -512,6 +543,21 @@ export default function App() {
           >
             Load Prebuilt
           </button>
+          <button
+            type="button"
+            className="toolbar-btn toolbar-btn-text"
+            onClick={handleLoadTestModel}
+            title="Load a local STL model for testing"
+          >
+            Test
+          </button>
+          <input
+            ref={testFileInputRef}
+            type="file"
+            accept=".stl"
+            onChange={handleTestFilePicked}
+            style={{ display: "none" }}
+          />
           <span className="toolbar-divider" />
           <Select value={measurementUnit} onValueChange={(value: string) => setMeasurementUnit(value as Unit)}>
             <SelectTrigger aria-label="Unit">
@@ -558,6 +604,17 @@ export default function App() {
           <button
             type="button"
             className="chat-refresh"
+            onClick={() =>
+              setGenerationMode((prev) => (prev === "cad_edit" ? "text_to_3d" : "cad_edit"))
+            }
+            disabled={isSending}
+            title="Toggle between CAD edit mode and text-to-3D mode"
+          >
+            {generationMode === "text_to_3d" ? "Mode: Text→3D" : "Mode: CAD Edit"}
+          </button>
+          <button
+            type="button"
+            className="chat-refresh"
             onClick={handleRefreshCompile}
             disabled={!latestCompileJobId || isSending}
           >
@@ -600,7 +657,11 @@ export default function App() {
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="Ask the assistant..."
+            placeholder={
+              generationMode === "text_to_3d"
+                ? "Describe a 3D object to generate..."
+                : "Ask the assistant to edit your current model..."
+            }
             className="chat-input"
             disabled={isSending}
           />

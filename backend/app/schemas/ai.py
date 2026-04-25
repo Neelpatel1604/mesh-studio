@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -24,6 +26,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str = "default"
     current_code: str | None = None
+    generation_mode: Literal["cad_edit", "text_to_3d"] = "cad_edit"
     provider: str | None = None
     model: str | None = None
     messages: list[ChatMessage] = Field(default_factory=list)

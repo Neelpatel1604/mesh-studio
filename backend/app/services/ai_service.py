@@ -29,6 +29,15 @@ Code edit output rules:
 - Do NOT output markdown "Find/Replace" prose.
 - Always produce a valid 3D top-level object suitable for STL export.
 - If your shape is 2D, convert it to 3D using operations like linear_extrude(), rotate_extrude(), or explicit 3D primitives.
+- Use OpenSCAD-compatible syntax only: do NOT use typed declarations like `float`, `int`, `var`, or semicolon-less syntax.
+"""
+
+TEXT_TO_3D_PROMPT_SUFFIX = """
+Text-to-3D mode is enabled.
+- Treat the latest user prompt as a fresh text-to-3D generation request.
+- Return ONLY one fenced code block tagged as synapscad.
+- Do NOT return <<<REPLACE>>> blocks in this mode.
+- Generate complete code that can be compiled as a standalone 3D model.
 """
 
 
@@ -88,12 +97,20 @@ class AIService:
             )
             conversation.append({"role": "user", "parts": [{"text": image_note}]})
 
-        if payload.current_code is not None and payload.current_code.strip():
+        if (
+            payload.generation_mode != "text_to_3d"
+            and payload.current_code is not None
+            and payload.current_code.strip()
+        ):
             code_context = (
                 "Current OpenSCAD code (use exact text when creating <<<REPLACE>>> blocks):\n"
                 f"```openscad\n{payload.current_code}\n```"
             )
             conversation.append({"role": "user", "parts": [{"text": code_context}]})
+
+        system_prompt = DEFAULT_SYSTEM_PROMPT
+        if payload.generation_mode == "text_to_3d":
+            system_prompt = f"{DEFAULT_SYSTEM_PROMPT}\n\n{TEXT_TO_3D_PROMPT_SUFFIX.strip()}"
 
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -101,7 +118,7 @@ class AIService:
         )
         body = {
             "system_instruction": {
-                "parts": [{"text": DEFAULT_SYSTEM_PROMPT}],
+                "parts": [{"text": system_prompt}],
             },
             "contents": conversation,
             "generationConfig": {
