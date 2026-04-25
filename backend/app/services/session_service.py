@@ -21,3 +21,13 @@ class SessionService:
         session.editor_state = editor_state
         self.save(session)
         return editor_state
+
+    def patch_editor_state(self, session_id: str, editor_state: EditorState) -> EditorState:
+        session = self.get(session_id)
+        current = session.editor_state.model_dump()
+        incoming = editor_state.model_dump()
+        current.update(incoming)
+        merged = EditorState(**current)
+        session.editor_state = merged
+        self.save(session)
+        return merged

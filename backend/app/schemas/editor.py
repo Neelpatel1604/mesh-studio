@@ -9,7 +9,11 @@ class ControlPoint(BaseModel):
 class EditorState(BaseModel):
     model_url: str | None = None
     mode: str = "orbit"
+    active_tool: str = "orbit"
     unit: str = "mm"
+    display_mode: str = "solid"
+    measure_subtool: str = "bounding_dimensions"
+    snap_enabled: bool = False
     selected_control_point: ControlPoint | None = None
     measurement_points: list[tuple[float, float, float]] = Field(default_factory=list)
 

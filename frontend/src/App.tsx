@@ -1,21 +1,18 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { ViewportCanvas } from "./components/viewport/ViewportCanvas";
+import { EditorViewportCanvas } from "./components/viewport/EditorViewportCanvas";
+import { DisplayControls } from "./components/ui/DisplayControls";
+import { DisplayMode, EditorTool, MeasureSubtool, PersistedEditorState, Unit } from "./components/viewport/editorTypes";
 
 type ChatRole = "user" | "assistant";
 type ChatEntry = { role: ChatRole; content: string };
-type EditorMode = "orbit" | "edit" | "measure";
-type Unit = "mm" | "cm" | "in";
 type Vec3 = [number, number, number];
 type EditorControlPoint = {
   id: string;
   position: Vec3;
 };
-type EditorStatePayload = {
-  model_url: string | null;
-  mode: EditorMode;
-  unit: Unit;
+type EditorStatePayload = PersistedEditorState & {
   selected_control_point: EditorControlPoint | null;
   measurement_points: Vec3[];
 };
@@ -43,9 +40,10 @@ export default function App() {
   >([0, 0, 0]);
   const [compileModelColor, setCompileModelColor] = useState("#b5b5b5");
   const [latestCompileJobId, setLatestCompileJobId] = useState<string | null>(null);
-  const [editorMode, setEditorMode] = useState<EditorMode>("orbit");
+  const [activeTool, setActiveTool] = useState<EditorTool>("orbit");
   const [measurementUnit, setMeasurementUnit] = useState<Unit>("mm");
-  const [renderMeshView, setRenderMeshView] = useState(false);
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("solid");
+  const [measureSubtool, setMeasureSubtool] = useState<MeasureSubtool>("bounding_dimensions");
   const [editorState, setEditorState] = useState<EditorStatePayload | null>(null);
   const [clearMeasureNonce, setClearMeasureNonce] = useState(0);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -94,8 +92,10 @@ export default function App() {
         }
         const data = (await response.json()) as EditorStatePayload;
         setEditorState(data);
-        setEditorMode(data.mode);
+        setActiveTool(data.active_tool ?? (data.mode as EditorTool) ?? "orbit");
         setMeasurementUnit(data.unit);
+        setDisplayMode(data.display_mode ?? "solid");
+        setMeasureSubtool(data.measure_subtool ?? "bounding_dimensions");
       } catch {
         // Editor endpoints might not exist yet during local startup.
       }
@@ -284,33 +284,39 @@ export default function App() {
         <div className="toolbar">
           <button
             type="button"
-            className={`toolbar-btn toolbar-btn-text ${editorMode === "orbit" ? "active" : ""}`}
-            onClick={() => setEditorMode("orbit")}
+            className={`toolbar-btn toolbar-btn-text ${activeTool === "orbit" ? "active" : ""}`}
+            onClick={() => setActiveTool("orbit")}
           >
             Orbit
           </button>
           <button
             type="button"
-            className={`toolbar-btn toolbar-btn-text ${editorMode === "edit" ? "active" : ""}`}
-            onClick={() => setEditorMode("edit")}
+            className={`toolbar-btn toolbar-btn-text ${activeTool === "select" ? "active" : ""}`}
+            onClick={() => setActiveTool("select")}
           >
-            Edit
+            Select
           </button>
           <button
             type="button"
-            className={`toolbar-btn toolbar-btn-text ${editorMode === "measure" ? "active" : ""}`}
-            onClick={() => setEditorMode("measure")}
+            className={`toolbar-btn toolbar-btn-text ${activeTool === "move" ? "active" : ""}`}
+            onClick={() => setActiveTool("move")}
+          >
+            Move
+          </button>
+          <button
+            type="button"
+            className={`toolbar-btn toolbar-btn-text ${activeTool === "measure" ? "active" : ""}`}
+            onClick={() => setActiveTool("measure")}
           >
             Measure
           </button>
           <span className="toolbar-divider" />
-          <button
-            type="button"
-            className={`toolbar-btn toolbar-btn-text ${renderMeshView ? "active" : ""}`}
-            onClick={() => setRenderMeshView((prev) => !prev)}
-          >
-            Render
-          </button>
+          <DisplayControls
+            displayMode={displayMode}
+            measureSubtool={measureSubtool}
+            onDisplayModeChange={setDisplayMode}
+            onMeasureSubtoolChange={setMeasureSubtool}
+          />
           <span className="toolbar-divider" />
           <button
             type="button"
@@ -330,13 +336,14 @@ export default function App() {
             <option value="in">in</option>
           </select>
         </div>
-        <ViewportCanvas
+        <EditorViewportCanvas
           modelUrl={compileModelUrl}
           modelRotationEuler={compileModelRotation}
           modelColor={compileModelColor}
-          mode={editorMode}
+          activeTool={activeTool}
           unit={measurementUnit}
-          renderMeshView={renderMeshView}
+          displayMode={displayMode}
+          measureSubtool={measureSubtool}
           persistedEditorState={editorState}
           onEditorStateChange={handleEditorStateChange}
           clearMeasureNonce={clearMeasureNonce}

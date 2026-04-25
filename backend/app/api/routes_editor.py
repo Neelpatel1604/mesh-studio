@@ -26,6 +26,11 @@ def put_editor_state(session_id: str, payload: EditorState) -> EditorState:
     return session_service.save_editor_state(session_id, payload)
 
 
+@router.patch("/sessions/{session_id}/editor-state", response_model=EditorState)
+def patch_editor_state(session_id: str, payload: EditorState) -> EditorState:
+    return session_service.patch_editor_state(session_id, payload)
+
+
 @router.post("/measurements", response_model=MeasurementResult)
 def measure_distance(payload: MeasurementRequest) -> MeasurementResult:
     distance = math.dist(payload.point_a, payload.point_b)
