@@ -484,6 +484,10 @@
     margin: 0 4px;
     flex-shrink: 0;
   }
+
+  .toolbar-spacer {
+    flex: 1;
+  }
   
   /* ── Properties panel rows (optional) ───────── */
   
