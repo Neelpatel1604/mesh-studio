@@ -6,7 +6,7 @@ frontend/.next/
 frontend/out/
 frontend/dist/
 frontend/.turbo/
-
+backend/storage/
 # Logs
 *.log
 npm-debug.log*

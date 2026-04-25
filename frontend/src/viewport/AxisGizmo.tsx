@@ -21,6 +21,14 @@ export function AxisGizmo() {
         color="#3b7bff"
         lineWidth={1.5}
       />
+      <Line
+        points={[
+          [0, -AXIS_LENGTH, 0],
+          [0, AXIS_LENGTH, 0],
+        ]}
+        color="#ffd400"
+        lineWidth={1.5}
+      />
     </group>
   );
 }
