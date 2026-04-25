@@ -223,6 +223,10 @@ export default function App() {
           {compileStatus ? (
             <div className="compile-status">Compile: {compileStatus}</div>
           ) : null}
+          <div className="compile-debug-rotation">
+            Rotation: [{compileModelRotation[0].toFixed(3)}, {compileModelRotation[1].toFixed(3)}
+            , {compileModelRotation[2].toFixed(3)}]
+          </div>
           {compilePreviewUrl ? (
             <img src={compilePreviewUrl} className="compile-preview" alt="compile preview" />
           ) : null}

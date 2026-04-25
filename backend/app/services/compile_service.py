@@ -185,6 +185,10 @@ class CompileService:
             job = self.jobs.get(job_id)
             if not job:
                 return None
+            output = job.get("output")
+            if isinstance(output, dict):
+                if self._normalize_output_orientation(output):
+                    needs_snapshot = True
             if job.get("status") == "running":
                 created_at = float(job.get("created_at", time.time()))
                 max_running = max(120, settings.compile_timeout_sec * 2)
@@ -306,6 +310,9 @@ class CompileService:
                 "process": None,
                 "created_at": job.get("created_at", time.time()),
             }
+            output = self.jobs[job_id].get("output")
+            if isinstance(output, dict):
+                self._normalize_output_orientation(output)
 
     def _save_jobs_snapshot(self) -> None:
         with self._lock:
@@ -325,3 +332,29 @@ class CompileService:
             json.dumps(serializable, indent=2),
             encoding="utf-8",
         )
+
+    def _normalize_output_orientation(self, output: dict) -> bool:
+        """
+        Ensure compile output orientation is usable by frontend.
+        Returns True when output is modified.
+        """
+        changed = False
+        orientation = output.get("orientation")
+        if not isinstance(orientation, dict):
+            output["orientation"] = {
+                "up_axis": "z",
+                "mesh_rotation_euler": [-1.57079632679, 0.0, 0.0],
+            }
+            return True
+
+        up_axis = orientation.get("up_axis")
+        euler = orientation.get("mesh_rotation_euler")
+        is_zero_euler = (
+            isinstance(euler, list)
+            and len(euler) == 3
+            and all(abs(float(v)) < 1e-9 for v in euler)
+        )
+        if up_axis == "z" and is_zero_euler:
+            orientation["mesh_rotation_euler"] = [-1.57079632679, 0.0, 0.0]
+            changed = True
+        return changed
