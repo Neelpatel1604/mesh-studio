@@ -3,7 +3,7 @@ import { Canvas, ThreeEvent, useFrame, useLoader, useThree } from "@react-three/
 import { memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { Material, Vector3Tuple } from "three";
 import { Box3, BufferAttribute, BufferGeometry, Group, Matrix4, Mesh, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
-import { STLLoader, ThreeMFLoader } from "three-stdlib";
+import { STLExporter, STLLoader, ThreeMFLoader } from "three-stdlib";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { HudPanel } from "../ui/HudPanel";
 import { AxisGizmo } from "./AxisGizmo";
@@ -23,6 +23,7 @@ type ViewportCanvasProps = {
   measureSubtool: MeasureSubtool;
   persistedEditorState?: PersistedEditorState | null;
   onEditorStateChange?: (state: PersistedEditorState) => void;
+  onExportMeshReady?: (exporter: (() => Blob | null) | null) => void;
   clearMeasureNonce?: number;
 };
 
@@ -679,9 +680,11 @@ type CompiledAssetProps = {
   onDragDeltaChange: (value: [number, number, number] | null) => void;
   setInteractionOwner: (owner: "camera" | "tool") => void;
   onMeasurePoint: (point: [number, number, number]) => void;
+  onObjectReady?: (object: Group | null) => void;
 };
 
 function CompiledStlAsset(props: CompiledAssetProps) {
+  const { onObjectReady, ...editableProps } = props;
   const stlGeometry = useLoader(STLLoader, props.modelUrl) as BufferGeometry;
   const object = useMemo(() => {
     const g = new Group();
@@ -689,10 +692,15 @@ function CompiledStlAsset(props: CompiledAssetProps) {
     g.add(m);
     return g;
   }, [props.modelColor, stlGeometry]);
-  return <EditableMeshPrimitive object={object} {...props} />;
+  useEffect(() => {
+    onObjectReady?.(object);
+    return () => onObjectReady?.(null);
+  }, [object, onObjectReady]);
+  return <EditableMeshPrimitive object={object} {...editableProps} />;
 }
 
 function Compiled3MFAsset(props: CompiledAssetProps) {
+  const { onObjectReady, ...editableProps } = props;
   const threemfObject = useLoader(ThreeMFLoader, props.modelUrl) as Group;
   const object = useMemo(() => {
     const g = threemfObject.clone(true) as Group;
@@ -709,7 +717,11 @@ function Compiled3MFAsset(props: CompiledAssetProps) {
     });
     return g;
   }, [props.modelColor, threemfObject]);
-  return <EditableMeshPrimitive object={object} {...props} />;
+  useEffect(() => {
+    onObjectReady?.(object);
+    return () => onObjectReady?.(null);
+  }, [object, onObjectReady]);
+  return <EditableMeshPrimitive object={object} {...editableProps} />;
 }
 
 export const EditorViewportCanvas = memo(function EditorViewportCanvas({
@@ -723,6 +735,7 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
   measureSubtool,
   persistedEditorState,
   onEditorStateChange,
+  onExportMeshReady,
   clearMeasureNonce = 0,
 }: ViewportCanvasProps) {
   const controlsRef = useRef<OrbitControlsImpl>(null);
@@ -734,6 +747,7 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
   const [measurePoints, setMeasurePoints] = useState<[number, number, number][]>([]);
   const [bounds, setBounds] = useState<BoundsInfo | null>(null);
   const [dragDelta, setDragDelta] = useState<[number, number, number] | null>(null);
+  const exportObjectRef = useRef<Group | null>(null);
   const navOverrideRef = useRef(false);
 
   useEffect(() => {
@@ -783,6 +797,32 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
     });
   }, [activeTool, displayMode, measurePoints, measureSubtool, modelUrl, onEditorStateChange, selectedControlPoint, unit]);
 
+  useEffect(() => {
+    if (!onExportMeshReady) {
+      return;
+    }
+    const exporter = new STLExporter();
+    const buildBlob = () => {
+      const source = exportObjectRef.current;
+      if (!source) {
+        return null;
+      }
+      const clone = source.clone(true);
+      clone.updateMatrixWorld(true);
+      const out = exporter.parse(clone, { binary: true }) as DataView | string;
+      if (typeof out === "string") {
+        return new Blob([out], { type: "model/stl" });
+      }
+      const bytes = new Uint8Array(out.byteLength);
+      for (let i = 0; i < out.byteLength; i += 1) {
+        bytes[i] = out.getUint8(i);
+      }
+      return new Blob([bytes], { type: "model/stl" });
+    };
+    onExportMeshReady(buildBlob);
+    return () => onExportMeshReady(null);
+  }, [modelUrl, onExportMeshReady]);
+
   const pointDistanceLabel = useMemo(() => {
     if (measurePoints.length !== 2) return null;
     return formatLength(new Vector3(...measurePoints[0]).distanceTo(new Vector3(...measurePoints[1])), unit);
@@ -828,6 +868,9 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
                   onDragDeltaChange={setDragDelta}
                   setInteractionOwner={setInteractionOwner}
                   onMeasurePoint={(point) => setMeasurePoints((prev) => [...prev, point].slice(-2))}
+                  onObjectReady={(object) => {
+                    exportObjectRef.current = object;
+                  }}
                 />
               ) : (
                 <CompiledStlAsset
@@ -847,6 +890,9 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
                   onDragDeltaChange={setDragDelta}
                   setInteractionOwner={setInteractionOwner}
                   onMeasurePoint={(point) => setMeasurePoints((prev) => [...prev, point].slice(-2))}
+                  onObjectReady={(object) => {
+                    exportObjectRef.current = object;
+                  }}
                 />
               )}
             </Suspense>

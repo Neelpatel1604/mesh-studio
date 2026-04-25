@@ -70,6 +70,7 @@ export default function App() {
   >([0, 0, 0]);
   const [compileModelColor, setCompileModelColor] = useState("#b5b5b5");
   const [latestCompileJobId, setLatestCompileJobId] = useState<string | null>(null);
+  const [exportEditedMesh, setExportEditedMesh] = useState<(() => Blob | null) | null>(null);
   const [activeTool, setActiveTool] = useState<EditorTool>("orbit");
   const [measurementUnit, setMeasurementUnit] = useState<Unit>("mm");
   const [displayMode, setDisplayMode] = useState<DisplayMode>("solid");
@@ -201,6 +202,27 @@ export default function App() {
     }
   };
 
+  const handleExportEditedModel = () => {
+    if (!exportEditedMesh) {
+      setError("No editable model is loaded yet.");
+      return;
+    }
+    const blob = exportEditedMesh();
+    if (!blob) {
+      setError("Unable to export current model. Try compiling/loading it again.");
+      return;
+    }
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = `mesh-studio-edited-${timestamp}.stl`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+  };
+
   const handleEditorStateChange = (payload: EditorStatePayload) => {
     if (autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
@@ -214,6 +236,10 @@ export default function App() {
         // Keep local state if autosave fails.
       });
     }, 500);
+  };
+
+  const handleExportMeshReady = (exporter: (() => Blob | null) | null) => {
+    setExportEditedMesh(() => exporter);
   };
 
   useEffect(() => {
@@ -482,6 +508,16 @@ export default function App() {
             <option value="cm">cm</option>
             <option value="in">in</option>
           </select>
+          <span className="toolbar-spacer" />
+          <button
+            type="button"
+            className="toolbar-btn toolbar-btn-text"
+            onClick={handleExportEditedModel}
+            disabled={!exportEditedMesh}
+            title="Export current edited model as STL"
+          >
+            Export
+          </button>
         </div>
         <EditorViewportCanvas
           modelUrl={compileModelUrl}
@@ -494,6 +530,7 @@ export default function App() {
           measureSubtool={measureSubtool}
           persistedEditorState={editorState}
           onEditorStateChange={handleEditorStateChange}
+          onExportMeshReady={handleExportMeshReady}
           clearMeasureNonce={clearMeasureNonce}
         />
       </section>
