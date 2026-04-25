@@ -1,0 +1,35 @@
+# Dependencies
+frontend/node_modules/
+
+# Build output
+frontend/.next/
+frontend/out/
+frontend/dist/
+frontend/.turbo/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local environment files
+.env
+.env.local
+.env.*.local
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+frontend/.env.production.local
+frontend/.env.development.local
+
+# OS/editor artifacts
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# TypeScript / tooling cache
+*.tsbuildinfo
+
