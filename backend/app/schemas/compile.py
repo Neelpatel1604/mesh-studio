@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 
 class CompileRequest(BaseModel):
     source_code: str = ""
+    user_id: str | None = None
 
 
 class CompileCreateResponse(BaseModel):

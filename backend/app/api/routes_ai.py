@@ -45,7 +45,10 @@ async def chat(payload: ChatRequest) -> ChatResponse:
     compile_status: str | None = None
     if code_change.applied:
         compile_job_id = compile_service.create_job(
-            CompileRequest(source_code=code_change.updated_code)
+            CompileRequest(
+                source_code=code_change.updated_code,
+                user_id=payload.user_id,
+            )
         )
         compile_status = "queued"
 

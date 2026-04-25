@@ -25,6 +25,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     session_id: str = "default"
+    user_id: str | None = None
     current_code: str | None = None
     generation_mode: Literal["cad_edit", "text_to_3d"] = "cad_edit"
     provider: str | None = None

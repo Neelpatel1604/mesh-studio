@@ -9,12 +9,14 @@ from tempfile import TemporaryDirectory
 
 from app.core.config import settings
 from app.schemas.compile import CompileRequest
+from app.services.artifact_registry_service import ArtifactRegistryService
 
 
 class CompileService:
-    def __init__(self) -> None:
+    def __init__(self, artifact_registry_service: ArtifactRegistryService | None = None) -> None:
         self.jobs: dict[str, dict] = {}
         self._lock = threading.Lock()
+        self._artifact_registry_service = artifact_registry_service
         self._artifacts_root = settings.storage_dir / "compile_artifacts"
         self._artifacts_root.mkdir(parents=True, exist_ok=True)
         self._jobs_snapshot_path = settings.storage_dir / "compile_jobs.json"
@@ -32,17 +34,18 @@ class CompileService:
                 "cancelled": False,
                 "process": None,
                 "created_at": time.time(),
+                "user_id": payload.user_id,
             }
         self._save_jobs_snapshot()
         thread = threading.Thread(
             target=self._run_sync,
-            args=(job_id, payload.source_code),
+            args=(job_id, payload.source_code, payload.user_id),
             daemon=True,
         )
         thread.start()
         return job_id
 
-    def _run_sync(self, job_id: str, source_code: str) -> None:
+    def _run_sync(self, job_id: str, source_code: str, user_id: str | None) -> None:
         with self._lock:
             job = self.jobs.get(job_id)
             if not job:
@@ -211,6 +214,16 @@ class CompileService:
             if cancelled_after_compile:
                 self._save_jobs_snapshot()
                 return
+            if self._artifact_registry_service is not None:
+                saved_to, save_error = self._artifact_registry_service.record_compile_artifact(
+                    user_id=user_id,
+                    job_id=job_id,
+                    output=output,
+                )
+                if save_error:
+                    warnings.append(save_error)
+                elif saved_to == "supabase":
+                    warnings.append("Artifact linked to user and saved to Supabase.")
             self._save_jobs_snapshot()
 
     def get_job(self, job_id: str) -> dict | None:
@@ -343,6 +356,7 @@ class CompileService:
                 "cancelled": job.get("cancelled", False),
                 "process": None,
                 "created_at": job.get("created_at", time.time()),
+                "user_id": job.get("user_id"),
             }
             output = self.jobs[job_id].get("output")
             if isinstance(output, dict):
@@ -360,6 +374,7 @@ class CompileService:
                     "error": job.get("error"),
                     "cancelled": job.get("cancelled", False),
                     "created_at": job.get("created_at", time.time()),
+                    "user_id": job.get("user_id"),
                 }
         self._jobs_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         self._jobs_snapshot_path.write_text(

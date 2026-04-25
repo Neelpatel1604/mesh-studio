@@ -47,6 +47,20 @@ type SpeechRecognitionInstance = {
 type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
 
 const DEFAULT_SESSION_ID = "default";
+const LOCAL_USER_ID_KEY = "mesh_studio_user_id";
+
+const getOrCreateLocalUserId = () => {
+  if (typeof window === "undefined") {
+    return "local-user-server";
+  }
+  const existing = window.localStorage.getItem(LOCAL_USER_ID_KEY);
+  if (existing && existing.trim().length > 0) {
+    return existing;
+  }
+  const generated = `local-${crypto.randomUUID()}`;
+  window.localStorage.setItem(LOCAL_USER_ID_KEY, generated);
+  return generated;
+};
 
 export default function App() {
   const [draft, setDraft] = useState("");
@@ -81,6 +95,7 @@ export default function App() {
   const [measureSubtool, setMeasureSubtool] = useState<MeasureSubtool>("bounding_dimensions");
   const [editorState, setEditorState] = useState<EditorStatePayload | null>(null);
   const [clearMeasureNonce, setClearMeasureNonce] = useState(0);
+  const [userId, setUserId] = useState<string>("local-user");
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const testFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -90,6 +105,10 @@ export default function App() {
     () => process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000",
     [],
   );
+
+  useEffect(() => {
+    setUserId(getOrCreateLocalUserId());
+  }, []);
 
   useEffect(() => {
     const loadModelMeta = async () => {
@@ -317,6 +336,7 @@ export default function App() {
         },
         body: JSON.stringify({
           session_id: DEFAULT_SESSION_ID,
+          user_id: userId,
           generation_mode: generationMode,
           current_code: generationMode === "text_to_3d" ? null : undefined,
           provider,
