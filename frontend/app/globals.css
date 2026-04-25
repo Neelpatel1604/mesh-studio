@@ -312,6 +312,36 @@
   filter: saturate(0.8);
 }
 
+.chat-mic-icon {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--panel-border-sub);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.chat-mic-icon:hover {
+  border-color: var(--accent-border);
+  color: var(--text-main);
+}
+
+.chat-mic-icon:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.chat-mic-icon.active {
+  color: #ffcece;
+  border-color: rgba(255, 79, 79, 0.7);
+  background: rgba(180, 40, 40, 0.25);
+}
+
 .chat-error {
   color: #ff8f8f;
   font-size: 0.8rem;

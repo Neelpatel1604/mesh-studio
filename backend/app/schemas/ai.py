@@ -41,3 +41,8 @@ class ChatResponse(BaseModel):
     code_change_error: str | None = None
     compile_job_id: str | None = None
     compile_status: str | None = None
+
+
+class TextToSpeechRequest(BaseModel):
+    text: str
+    voice_id: str | None = None
