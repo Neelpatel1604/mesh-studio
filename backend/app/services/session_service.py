@@ -1,3 +1,4 @@
+from app.schemas.editor import EditorState
 from app.schemas.session import SessionDocument
 
 
@@ -11,3 +12,22 @@ class SessionService:
     def save(self, payload: SessionDocument) -> SessionDocument:
         self._sessions[payload.id] = payload
         return payload
+
+    def get_editor_state(self, session_id: str) -> EditorState:
+        return self.get(session_id).editor_state
+
+    def save_editor_state(self, session_id: str, editor_state: EditorState) -> EditorState:
+        session = self.get(session_id)
+        session.editor_state = editor_state
+        self.save(session)
+        return editor_state
+
+    def patch_editor_state(self, session_id: str, editor_state: EditorState) -> EditorState:
+        session = self.get(session_id)
+        current = session.editor_state.model_dump()
+        incoming = editor_state.model_dump()
+        current.update(incoming)
+        merged = EditorState(**current)
+        session.editor_state = merged
+        self.save(session)
+        return merged

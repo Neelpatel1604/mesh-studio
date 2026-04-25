@@ -1,10 +1,23 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ViewportCanvas } from "./viewport/ViewportCanvas";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { EditorViewportCanvas } from "./components/viewport/EditorViewportCanvas";
+import { DisplayControls } from "./components/ui/DisplayControls";
+import { DisplayMode, DotDensityMode, EditorTool, MeasureSubtool, PersistedEditorState, Unit } from "./components/viewport/editorTypes";
 
 type ChatRole = "user" | "assistant";
 type ChatEntry = { role: ChatRole; content: string };
+type Vec3 = [number, number, number];
+type EditorControlPoint = {
+  id: string;
+  position: Vec3;
+};
+type EditorStatePayload = PersistedEditorState & {
+  selected_control_point: EditorControlPoint | null;
+  measurement_points: Vec3[];
+};
+
+const DEFAULT_SESSION_ID = "default";
 
 export default function App() {
   const [draft, setDraft] = useState("");
@@ -27,6 +40,14 @@ export default function App() {
   >([0, 0, 0]);
   const [compileModelColor, setCompileModelColor] = useState("#b5b5b5");
   const [latestCompileJobId, setLatestCompileJobId] = useState<string | null>(null);
+  const [activeTool, setActiveTool] = useState<EditorTool>("orbit");
+  const [measurementUnit, setMeasurementUnit] = useState<Unit>("mm");
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("solid");
+  const [dotDensityMode, setDotDensityMode] = useState<DotDensityMode>("dense");
+  const [measureSubtool, setMeasureSubtool] = useState<MeasureSubtool>("bounding_dimensions");
+  const [editorState, setEditorState] = useState<EditorStatePayload | null>(null);
+  const [clearMeasureNonce, setClearMeasureNonce] = useState(0);
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const apiBase = useMemo(
     () => process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000",
@@ -61,6 +82,27 @@ export default function App() {
       }
     };
     void loadModelMeta();
+  }, [apiBase]);
+
+  useEffect(() => {
+    const loadEditorState = async () => {
+      try {
+        const response = await fetch(`${apiBase}/sessions/${DEFAULT_SESSION_ID}/editor-state`);
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as EditorStatePayload;
+        setEditorState(data);
+        setActiveTool(data.active_tool ?? (data.mode as EditorTool) ?? "orbit");
+        setMeasurementUnit(data.unit);
+        setDisplayMode(data.display_mode ?? "solid");
+        setDotDensityMode(data.dot_density_mode ?? "dense");
+        setMeasureSubtool(data.measure_subtool ?? "bounding_dimensions");
+      } catch {
+        // Editor endpoints might not exist yet during local startup.
+      }
+    };
+    void loadEditorState();
   }, [apiBase]);
 
   const extractColorHintFromScad = (scad?: string) => {
@@ -128,6 +170,29 @@ export default function App() {
     }
   };
 
+  const handleEditorStateChange = (payload: EditorStatePayload) => {
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+    }
+    autosaveTimerRef.current = setTimeout(() => {
+      void fetch(`${apiBase}/sessions/${DEFAULT_SESSION_ID}/editor-state`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).catch(() => {
+        // Keep local state if autosave fails.
+      });
+    }, 500);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleSend = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = draft.trim();
@@ -149,7 +214,7 @@ export default function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          session_id: "default",
+          session_id: DEFAULT_SESSION_ID,
           provider,
           model,
           messages: nextMessages.map((msg) => ({
@@ -218,10 +283,68 @@ export default function App() {
   return (
     <main className="app-shell">
       <section className="viewport-pane">
-        <ViewportCanvas
+        <div className="toolbar">
+          <button
+            type="button"
+            className={`toolbar-btn toolbar-btn-text ${activeTool === "orbit" ? "active" : ""}`}
+            onClick={() => setActiveTool("orbit")}
+          >
+            Orbit
+          </button>
+          <button
+            type="button"
+            className={`toolbar-btn toolbar-btn-text ${activeTool === "edit" ? "active" : ""}`}
+            onClick={() => setActiveTool("edit")}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            className={`toolbar-btn toolbar-btn-text ${activeTool === "measure" ? "active" : ""}`}
+            onClick={() => setActiveTool("measure")}
+          >
+            Measure
+          </button>
+          <span className="toolbar-divider" />
+          <DisplayControls
+            displayMode={displayMode}
+            dotDensityMode={dotDensityMode}
+            measureSubtool={measureSubtool}
+            onDisplayModeChange={setDisplayMode}
+            onDotDensityModeChange={setDotDensityMode}
+            onMeasureSubtoolChange={setMeasureSubtool}
+          />
+          <span className="toolbar-divider" />
+          <button
+            type="button"
+            className="toolbar-btn toolbar-btn-text"
+            onClick={() => setClearMeasureNonce((prev) => prev + 1)}
+          >
+            Clear Measure
+          </button>
+          <span className="toolbar-divider" />
+          <select
+            className="toolbar-unit-select"
+            value={measurementUnit}
+            onChange={(event) => setMeasurementUnit(event.target.value as Unit)}
+          >
+            <option value="mm">mm</option>
+            <option value="cm">cm</option>
+            <option value="in">in</option>
+          </select>
+        </div>
+        <EditorViewportCanvas
           modelUrl={compileModelUrl}
           modelRotationEuler={compileModelRotation}
           modelColor={compileModelColor}
+          activeTool={activeTool}
+          unit={measurementUnit}
+          displayMode={displayMode}
+          dotDensityMode={dotDensityMode}
+          measureSubtool={measureSubtool}
+          persistedEditorState={editorState}
+          onEditorStateChange={handleEditorStateChange}
+          clearMeasureNonce={clearMeasureNonce}
         />
       </section>
 

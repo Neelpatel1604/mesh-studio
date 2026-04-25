@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.api.routes_ai import router as ai_router
 from app.api.routes_compile import router as compile_router
+from app.api.routes_editor import router as editor_router
 from app.api.routes_sessions import router as sessions_router
 from app.api.routes_uploads import router as uploads_router
 from app.core.config import settings
@@ -23,11 +24,15 @@ app.add_middleware(
 
 app.include_router(ai_router)
 app.include_router(compile_router)
+app.include_router(editor_router)
 app.include_router(sessions_router)
 app.include_router(uploads_router)
 artifacts_dir = Path(settings.storage_dir) / "compile_artifacts"
 artifacts_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/artifacts", StaticFiles(directory=artifacts_dir), name="artifacts")
+edited_dir = Path(settings.storage_dir) / "edited_meshes"
+edited_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/edited", StaticFiles(directory=edited_dir), name="edited")
 
 
 @app.get("/health")

@@ -17,3 +17,15 @@ def test_upload_image_metadata_only() -> None:
     assert body["size_bytes"] == len(b"fakepng-bytes")
     assert body["sha256"]
     assert "not stored" in body["message"].lower()
+
+
+def test_upload_mesh_stores_file() -> None:
+    response = client.post(
+        "/uploads/meshes",
+        files={"file": ("edited.stl", b"solid test\nendsolid test\n", "application/sla")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["filename"] == "edited.stl"
+    assert body["file_url"].startswith("/edited/")
+    assert body["size_bytes"] > 0

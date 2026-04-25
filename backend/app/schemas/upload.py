@@ -8,3 +8,7 @@ class UploadResponse(BaseModel):
     size_bytes: int
     sha256: str
     message: str
+
+
+class MeshUploadResponse(UploadResponse):
+    file_url: str
