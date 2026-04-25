@@ -365,6 +365,75 @@
     font-size: 0.8rem;
     transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
   }
+
+  .toolbar-btn-text {
+    width: auto;
+    padding: 0 10px;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .toolbar-unit-select {
+    border: 1px solid var(--panel-border-sub);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-main);
+    padding: 5px 8px;
+    font-size: 0.78rem;
+  }
+
+  .viewport-canvas-wrap {
+    position: relative;
+    width: 100%;
+    height: calc(100% - 43px);
+  }
+
+  .viewport-hud {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--panel-border-sub);
+    background: rgba(12, 10, 8, 0.74);
+    color: var(--text-soft);
+    font-size: 0.74rem;
+    pointer-events: none;
+  }
+
+  .ui-hud-panel {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--panel-border-sub);
+    background: rgba(12, 10, 8, 0.74);
+    color: var(--text-soft);
+    font-size: 0.74rem;
+    pointer-events: none;
+  }
+
+  .measure-edge-label {
+    color: #fef5dd;
+    border: 1px solid rgba(255, 214, 134, 0.5);
+    background: rgba(18, 14, 10, 0.92);
+    border-radius: 6px;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    user-select: none;
+  }
   
   .toolbar-btn:hover {
     background: rgba(255, 255, 255, 0.06);

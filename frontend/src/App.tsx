@@ -1,10 +1,26 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ViewportCanvas } from "./viewport/ViewportCanvas";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ViewportCanvas } from "./components/viewport/ViewportCanvas";
 
 type ChatRole = "user" | "assistant";
 type ChatEntry = { role: ChatRole; content: string };
+type EditorMode = "orbit" | "edit" | "measure";
+type Unit = "mm" | "cm" | "in";
+type Vec3 = [number, number, number];
+type EditorControlPoint = {
+  id: string;
+  position: Vec3;
+};
+type EditorStatePayload = {
+  model_url: string | null;
+  mode: EditorMode;
+  unit: Unit;
+  selected_control_point: EditorControlPoint | null;
+  measurement_points: Vec3[];
+};
+
+const DEFAULT_SESSION_ID = "default";
 
 export default function App() {
   const [draft, setDraft] = useState("");
@@ -27,6 +43,12 @@ export default function App() {
   >([0, 0, 0]);
   const [compileModelColor, setCompileModelColor] = useState("#b5b5b5");
   const [latestCompileJobId, setLatestCompileJobId] = useState<string | null>(null);
+  const [editorMode, setEditorMode] = useState<EditorMode>("orbit");
+  const [measurementUnit, setMeasurementUnit] = useState<Unit>("mm");
+  const [renderMeshView, setRenderMeshView] = useState(false);
+  const [editorState, setEditorState] = useState<EditorStatePayload | null>(null);
+  const [clearMeasureNonce, setClearMeasureNonce] = useState(0);
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const apiBase = useMemo(
     () => process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000",
@@ -61,6 +83,24 @@ export default function App() {
       }
     };
     void loadModelMeta();
+  }, [apiBase]);
+
+  useEffect(() => {
+    const loadEditorState = async () => {
+      try {
+        const response = await fetch(`${apiBase}/sessions/${DEFAULT_SESSION_ID}/editor-state`);
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as EditorStatePayload;
+        setEditorState(data);
+        setEditorMode(data.mode);
+        setMeasurementUnit(data.unit);
+      } catch {
+        // Editor endpoints might not exist yet during local startup.
+      }
+    };
+    void loadEditorState();
   }, [apiBase]);
 
   const extractColorHintFromScad = (scad?: string) => {
@@ -128,6 +168,29 @@ export default function App() {
     }
   };
 
+  const handleEditorStateChange = (payload: EditorStatePayload) => {
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+    }
+    autosaveTimerRef.current = setTimeout(() => {
+      void fetch(`${apiBase}/sessions/${DEFAULT_SESSION_ID}/editor-state`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).catch(() => {
+        // Keep local state if autosave fails.
+      });
+    }, 500);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleSend = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = draft.trim();
@@ -149,7 +212,7 @@ export default function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          session_id: "default",
+          session_id: DEFAULT_SESSION_ID,
           provider,
           model,
           messages: nextMessages.map((msg) => ({
@@ -218,10 +281,65 @@ export default function App() {
   return (
     <main className="app-shell">
       <section className="viewport-pane">
+        <div className="toolbar">
+          <button
+            type="button"
+            className={`toolbar-btn toolbar-btn-text ${editorMode === "orbit" ? "active" : ""}`}
+            onClick={() => setEditorMode("orbit")}
+          >
+            Orbit
+          </button>
+          <button
+            type="button"
+            className={`toolbar-btn toolbar-btn-text ${editorMode === "edit" ? "active" : ""}`}
+            onClick={() => setEditorMode("edit")}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            className={`toolbar-btn toolbar-btn-text ${editorMode === "measure" ? "active" : ""}`}
+            onClick={() => setEditorMode("measure")}
+          >
+            Measure
+          </button>
+          <span className="toolbar-divider" />
+          <button
+            type="button"
+            className={`toolbar-btn toolbar-btn-text ${renderMeshView ? "active" : ""}`}
+            onClick={() => setRenderMeshView((prev) => !prev)}
+          >
+            Render
+          </button>
+          <span className="toolbar-divider" />
+          <button
+            type="button"
+            className="toolbar-btn toolbar-btn-text"
+            onClick={() => setClearMeasureNonce((prev) => prev + 1)}
+          >
+            Clear Measure
+          </button>
+          <span className="toolbar-divider" />
+          <select
+            className="toolbar-unit-select"
+            value={measurementUnit}
+            onChange={(event) => setMeasurementUnit(event.target.value as Unit)}
+          >
+            <option value="mm">mm</option>
+            <option value="cm">cm</option>
+            <option value="in">in</option>
+          </select>
+        </div>
         <ViewportCanvas
           modelUrl={compileModelUrl}
           modelRotationEuler={compileModelRotation}
           modelColor={compileModelColor}
+          mode={editorMode}
+          unit={measurementUnit}
+          renderMeshView={renderMeshView}
+          persistedEditorState={editorState}
+          onEditorStateChange={handleEditorStateChange}
+          clearMeasureNonce={clearMeasureNonce}
         />
       </section>
 
