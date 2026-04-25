@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"
     openscad_bin: str = "openscad"
-    compile_timeout_sec: int = 900
+    compile_timeout_sec: int = 1500
 
     model_config = SettingsConfigDict(
         env_file=(".env", "app/.env"),
