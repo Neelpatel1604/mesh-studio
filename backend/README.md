@@ -1,26 +1,66 @@
-# Mesh Studio Python Backend
+# Mesh Studio Backend (FastAPI)
 
-FastAPI service that exposes AI, compile, session, and upload endpoints for the frontend.
+This backend powers Mesh Studio's AI-assisted CAD workflow.
 
-## Requirements
+It receives user prompts, generates and edits model code, compiles geometry through OpenSCAD, and stores model/chat metadata so the frontend can load project history.
 
-- OpenSCAD CLI installed and available on PATH (`openscad`), or set `OPENSCAD_BIN` env var.
+## Project Overview
 
-## Run
+Main responsibilities:
+
+- AI prompt-to-model and model-edit flows
+- compile jobs for preview/printable outputs
+- user artifact persistence and retrieval
+- chat history persistence per user/chat
+
+## Tech Stack
+
+- Python 3.11+
+- FastAPI + Uvicorn
+- We use a stability-tuned AI runtime for chat/model-edit generation
+- We benchmark product direction against Gemma 4 class capabilities
+- OpenSCAD CLI for geometry compilation
+- optional Supabase tables for artifact/chat storage
+
+## Prerequisites
+
+- Python 3.11 or newer
+- OpenSCAD installed and available on `PATH`
+  - If not on `PATH`, set `OPENSCAD_BIN` in your environment
+
+## Quick Start
+
+Run in PowerShell:
 
 ```powershell
-Set-Location "C:\Users\patel\Downloads\side-projects\Berahacks\mesh-studio\backend"; python -m venv ".venv"; & "C:\Users\patel\Downloads\side-projects\Berahacks\mesh-studio\backend\.venv\Scripts\Activate.ps1"; pip install -e ".[dev]"; uvicorn --app-dir "C:\Users\patel\Downloads\side-projects\Berahacks\mesh-studio\backend" app.main:app --reload --host 0.0.0.0 --port 8000
+Set-Location "./backend"
+python -m venv ".venv"
+& ".\.venv\Scripts\Activate.ps1"
+pip install -e ".[dev]"
+uvicorn --app-dir "." app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-## Supabase Artifact Registry
+Backend base URL: `http://127.0.0.1:8000`
 
-To persist compile artifact IDs per user, set:
+## Core API Flow
+
+- Send prompt/edit requests to AI endpoints
+- Compile generated model via `POST /compile` (include `user_id`)
+- Save a result when needed via `POST /users/{user_id}/artifacts/save`
+- Read saved artifacts via `GET /users/{user_id}/artifacts`
+- Read chat history:
+  - `GET /chat-history?user_id=...`
+  - `GET /chat-history/{chat_id}?user_id=...`
+
+## Supabase (Optional but Recommended)
+
+Set these environment variables to persist artifacts:
 
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `SUPABASE_ARTIFACTS_TABLE` (optional, defaults to `compile_artifacts`)
+- `SUPABASE_ARTIFACTS_TABLE` (optional, default `compile_artifacts`)
 
-Suggested table:
+Suggested `compile_artifacts` table:
 
 ```sql
 create table if not exists public.compile_artifacts (
@@ -39,18 +79,7 @@ create index if not exists compile_artifacts_user_id_idx
   on public.compile_artifacts (user_id, created_at desc);
 ```
 
-API flow:
-
-- Include `user_id` in `POST /compile` request body.
-- Save manually when user clicks Save: `POST /users/{user_id}/artifacts/save` with `compile_job_id`.
-- Fetch saved artifacts via `GET /users/{user_id}/artifacts`.
-- Chat history by chat ID:
-  - `GET /chat-history?user_id=...` (list chats)
-  - `GET /chat-history/{chat_id}?user_id=...` (message timeline)
-
-Note: Save endpoint now appends a new row only when the saved model changed from the latest saved row.
-
-Suggested chat history table:
+Suggested `chat_messages` table:
 
 ```sql
 create table if not exists public.chat_messages (
@@ -69,3 +98,21 @@ create table if not exists public.chat_messages (
 create index if not exists chat_messages_user_chat_created_idx
   on public.chat_messages (user_id, chat_id, created_at asc);
 ```
+
+## Troubleshooting
+
+- `openscad` not found:
+  - install OpenSCAD or set `OPENSCAD_BIN`
+- backend starts but compile fails:
+  - verify OpenSCAD path and required env vars in `.env`
+- PowerShell activation blocked:
+  - run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` once in the current shell
+
+## What To Share For Next Improvements
+
+To help plan the next iteration quickly, share:
+
+- 2-5 example prompts you expect users to type
+- PNG references for expected model look/style
+- short videos/GIFs of desired interaction flow (optional)
+- any output quality targets (preview quality, compile speed, export format)
