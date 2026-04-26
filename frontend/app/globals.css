@@ -720,17 +720,47 @@
 .model-transform-select {
   width: 100%;
   border-radius: 8px;
-  border: 1px solid rgba(255, 214, 134, 0.34);
-  background: rgba(14, 11, 8, 0.96);
-  color: #fff3dd;
+  border: 1px solid rgba(255, 214, 134, 0.42);
+  background: linear-gradient(180deg, rgba(20, 16, 12, 0.98), rgba(12, 10, 8, 0.98));
+  color: #fff5e3;
   font-size: 0.78rem;
+  font-weight: 600;
   font-family: inherit;
-  padding: 5px 7px;
+  line-height: 1.2;
+  padding: 7px 30px 7px 10px;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+  cursor: pointer;
 }
 
 .model-transform-select:focus {
   outline: none;
-  border-color: var(--accent-border);
+  border-color: rgba(255, 214, 134, 0.85);
+  box-shadow: 0 0 0 2px rgba(255, 214, 134, 0.24);
+}
+
+.model-transform-select:hover {
+  border-color: rgba(255, 214, 134, 0.68);
+  background: linear-gradient(180deg, rgba(24, 19, 14, 0.98), rgba(14, 11, 8, 0.98));
+}
+
+.model-transform-select-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.model-transform-select-icon {
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #ffddb0;
+  opacity: 0.92;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
 }
 
 .model-transform-color {
