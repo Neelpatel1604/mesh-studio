@@ -16,6 +16,8 @@ import { ModelStage } from "./ModelStage";
 type ViewportCanvasProps = {
   modelUrl?: string | null;
   modelRotationEuler?: [number, number, number];
+  modelPosition?: [number, number, number];
+  modelScale?: [number, number, number];
   modelColor?: string;
   activeTool: EditorTool;
   unit: Unit;
@@ -54,6 +56,8 @@ function EditableMeshPrimitive({
   object,
   activeTool,
   modelRotationEuler,
+  modelPosition,
+  modelScale,
   displayMode,
   unit,
   measureSubtool,
@@ -70,6 +74,8 @@ function EditableMeshPrimitive({
   object: Group;
   activeTool: EditorTool;
   modelRotationEuler: [number, number, number];
+  modelPosition: [number, number, number];
+  modelScale: [number, number, number];
   displayMode: DisplayMode;
   unit: Unit;
   measureSubtool: MeasureSubtool;
@@ -748,7 +754,14 @@ function EditableMeshPrimitive({
   };
 
   return (
-    <group ref={groupRef} rotation={modelRotationEuler} onPointerDown={handlePointerDown} onPointerUp={handlePointerUp}>
+    <group
+      ref={groupRef}
+      rotation={modelRotationEuler}
+      position={modelPosition}
+      scale={modelScale}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+    >
       <primitive object={object} />
       {grabPointOverlays.map((overlay) => (
         <points
@@ -808,6 +821,8 @@ function EditableMeshPrimitive({
 type CompiledAssetProps = {
   modelUrl: string;
   modelRotationEuler: [number, number, number];
+  modelPosition: [number, number, number];
+  modelScale: [number, number, number];
   modelColor: string;
   activeTool: EditorTool;
   unit: Unit;
@@ -869,6 +884,8 @@ function Compiled3MFAsset(props: CompiledAssetProps) {
 export const EditorViewportCanvas = memo(function EditorViewportCanvas({
   modelUrl,
   modelRotationEuler = [0, 0, 0],
+  modelPosition = [0, 0, 0],
+  modelScale = [1, 1, 1],
   modelColor = "#b5b5b5",
   activeTool,
   unit,
@@ -988,7 +1005,7 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
       <div className="axis-corner-indicator" aria-hidden="true">
         <AxisCornerIndicator ref={axisIndicatorRef} />
       </div>
-      <Canvas gl={{ antialias: true, alpha: true }} camera={{ position: [8, 6, 8], fov: 45, near: 0.01, far: 2000 }} dpr={[1, 2]}>
+      <Canvas gl={{ antialias: true, alpha: true }} camera={{ position: [8, 6, 8], fov: 45, near: 0.01, far: 50000 }} dpr={[1, 2]}>
         <ambientLight intensity={0.55} />
         <directionalLight position={[8, 14, 10]} intensity={0.75} />
         <InfiniteGrid />
@@ -1001,6 +1018,8 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
                 <Compiled3MFAsset
                   modelUrl={modelUrl}
                   modelRotationEuler={modelRotationEuler}
+                  modelPosition={modelPosition}
+                  modelScale={modelScale}
                   modelColor={modelColor}
                   activeTool={activeTool}
                   unit={unit}
@@ -1023,6 +1042,8 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
                 <CompiledStlAsset
                   modelUrl={modelUrl}
                   modelRotationEuler={modelRotationEuler}
+                  modelPosition={modelPosition}
+                  modelScale={modelScale}
                   modelColor={modelColor}
                   activeTool={activeTool}
                   unit={unit}
@@ -1051,7 +1072,7 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
           enableDamping
           dampingFactor={0.08}
           minDistance={0.05}
-          maxDistance={1200}
+          maxDistance={6000}
           minPolarAngle={-Infinity}
           maxPolarAngle={Infinity}
         />

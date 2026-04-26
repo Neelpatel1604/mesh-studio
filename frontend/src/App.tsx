@@ -50,6 +50,8 @@ const DEFAULT_SESSION_ID = "default";
 const LOCAL_USER_ID_KEY = "mesh_studio_user_id";
 const DEFAULT_STL_ROTATION: [number, number, number] = [-1.57079632679, 0, 0];
 const DEFAULT_MODEL_ROTATION: [number, number, number] = [0, 0, 0];
+const DEFAULT_MODEL_POSITION: [number, number, number] = [0, 0, 0];
+const DEFAULT_MODEL_SCALE: [number, number, number] = [1, 1, 1];
 
 const getOrCreateLocalUserId = () => {
   if (typeof window === "undefined") {
@@ -99,6 +101,12 @@ export default function App({
   const [compileModelRotation, setCompileModelRotation] = useState<
     [number, number, number]
   >([0, 0, 0]);
+  const [compileModelPosition, setCompileModelPosition] = useState<[number, number, number]>(
+    DEFAULT_MODEL_POSITION,
+  );
+  const [compileModelScale, setCompileModelScale] = useState<[number, number, number]>(
+    DEFAULT_MODEL_SCALE,
+  );
   const [compileModelColor, setCompileModelColor] = useState("#b5b5b5");
   const [latestCompileJobId, setLatestCompileJobId] = useState<string | null>(null);
   const [exportEditedMesh, setExportEditedMesh] = useState<(() => Blob | null) | null>(null);
@@ -118,6 +126,8 @@ export default function App({
     [],
   );
   const sessionId = initialSessionId.trim() || DEFAULT_SESSION_ID;
+  const toDegrees = (value: number) => (value * 180) / Math.PI;
+  const toRadians = (value: number) => (value * Math.PI) / 180;
 
   useEffect(() => {
     setUserId(getOrCreateLocalUserId());
@@ -192,6 +202,8 @@ export default function App({
     setLatestCompileJobId(null);
     setError(null);
     setCompileStatus(initialCompileStatus ?? "loaded artifact model");
+    setCompileModelPosition(DEFAULT_MODEL_POSITION);
+    setCompileModelScale(DEFAULT_MODEL_SCALE);
   }, [initialCompileStatus, initialModelRotation, initialModelUrl]);
 
   const extractColorHintFromScad = (scad?: string) => {
@@ -347,6 +359,8 @@ export default function App({
     setSaveStatus(null);
     setError(null);
     setExportEditedMesh(null);
+    setCompileModelPosition(DEFAULT_MODEL_POSITION);
+    setCompileModelScale(DEFAULT_MODEL_SCALE);
   };
 
   const handleTestFilePicked = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -376,6 +390,8 @@ export default function App({
       const body = (await response.json()) as { file_id: string; file_url: string; filename?: string };
       setCompileModelUrl(`${apiBase}${body.file_url}?t=${Date.now()}`);
       setCompileModelRotation(DEFAULT_STL_ROTATION);
+      setCompileModelPosition(DEFAULT_MODEL_POSITION);
+      setCompileModelScale(DEFAULT_MODEL_SCALE);
       setCompilePreviewUrl(null);
       setLatestCompileJobId(null);
       setSaveStatus("saving...");
@@ -579,6 +595,49 @@ export default function App({
     }
   };
 
+  const updateModelPositionAxis = (axis: 0 | 1 | 2, value: string) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+    setCompileModelPosition((prev) => {
+      const next: [number, number, number] = [...prev];
+      next[axis] = parsed;
+      return next;
+    });
+  };
+
+  const updateModelRotationAxisDeg = (axis: 0 | 1 | 2, value: string) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+    setCompileModelRotation((prev) => {
+      const next: [number, number, number] = [...prev];
+      next[axis] = toRadians(parsed);
+      return next;
+    });
+  };
+
+  const updateModelScaleAxis = (axis: 0 | 1 | 2, value: string) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return;
+    }
+    setCompileModelScale((prev) => {
+      const next: [number, number, number] = [...prev];
+      next[axis] = parsed;
+      return next;
+    });
+  };
+
+  const handleResetModelTransform = () => {
+    const isStl = (compileModelUrl ?? "").toLowerCase().includes(".stl");
+    setCompileModelRotation(isStl ? DEFAULT_STL_ROTATION : DEFAULT_MODEL_ROTATION);
+    setCompileModelPosition(DEFAULT_MODEL_POSITION);
+    setCompileModelScale(DEFAULT_MODEL_SCALE);
+  };
+
   return (
     <main className="app-shell">
       <section className="viewport-pane">
@@ -701,6 +760,8 @@ export default function App({
         <EditorViewportCanvas
           modelUrl={compileModelUrl}
           modelRotationEuler={compileModelRotation}
+          modelPosition={compileModelPosition}
+          modelScale={compileModelScale}
           modelColor={compileModelColor}
           activeTool={activeTool}
           unit={measurementUnit}
@@ -712,6 +773,102 @@ export default function App({
           onExportMeshReady={handleExportMeshReady}
           clearMeasureNonce={clearMeasureNonce}
         />
+        {compileModelUrl ? (
+          <div className="model-transform-panel">
+            <div className="model-transform-title">Transform</div>
+            <div className="model-transform-row">
+              <span className="model-transform-label">Pos</span>
+              <input
+                type="number"
+                className="model-transform-input"
+                step="1"
+                value={compileModelPosition[0]}
+                onChange={(e) => updateModelPositionAxis(0, e.target.value)}
+                aria-label="Position X"
+              />
+              <input
+                type="number"
+                className="model-transform-input"
+                step="1"
+                value={compileModelPosition[1]}
+                onChange={(e) => updateModelPositionAxis(1, e.target.value)}
+                aria-label="Position Y"
+              />
+              <input
+                type="number"
+                className="model-transform-input"
+                step="1"
+                value={compileModelPosition[2]}
+                onChange={(e) => updateModelPositionAxis(2, e.target.value)}
+                aria-label="Position Z"
+              />
+            </div>
+            <div className="model-transform-row">
+              <span className="model-transform-label">Rot</span>
+              <input
+                type="number"
+                className="model-transform-input"
+                step="1"
+                value={toDegrees(compileModelRotation[0]).toFixed(1)}
+                onChange={(e) => updateModelRotationAxisDeg(0, e.target.value)}
+                aria-label="Rotation X degrees"
+              />
+              <input
+                type="number"
+                className="model-transform-input"
+                step="1"
+                value={toDegrees(compileModelRotation[1]).toFixed(1)}
+                onChange={(e) => updateModelRotationAxisDeg(1, e.target.value)}
+                aria-label="Rotation Y degrees"
+              />
+              <input
+                type="number"
+                className="model-transform-input"
+                step="1"
+                value={toDegrees(compileModelRotation[2]).toFixed(1)}
+                onChange={(e) => updateModelRotationAxisDeg(2, e.target.value)}
+                aria-label="Rotation Z degrees"
+              />
+            </div>
+            <div className="model-transform-row">
+              <span className="model-transform-label">Scale</span>
+              <input
+                type="number"
+                className="model-transform-input"
+                step="0.1"
+                min="0.1"
+                value={compileModelScale[0]}
+                onChange={(e) => updateModelScaleAxis(0, e.target.value)}
+                aria-label="Scale X"
+              />
+              <input
+                type="number"
+                className="model-transform-input"
+                step="0.1"
+                min="0.1"
+                value={compileModelScale[1]}
+                onChange={(e) => updateModelScaleAxis(1, e.target.value)}
+                aria-label="Scale Y"
+              />
+              <input
+                type="number"
+                className="model-transform-input"
+                step="0.1"
+                min="0.1"
+                value={compileModelScale[2]}
+                onChange={(e) => updateModelScaleAxis(2, e.target.value)}
+                aria-label="Scale Z"
+              />
+            </div>
+            <button
+              type="button"
+              className="toolbar-btn toolbar-btn-text"
+              onClick={handleResetModelTransform}
+            >
+              Reset Transform
+            </button>
+          </div>
+        ) : null}
       </section>
 
       <aside className="chat-panel">
