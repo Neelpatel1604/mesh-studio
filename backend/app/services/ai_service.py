@@ -48,7 +48,11 @@ Text-to-3D mode is enabled.
 class AIService:
     def __init__(self) -> None:
         self._provider_models = {
-            "gemini": ["gemini-2.5-pro"],
+            "gemini": [
+                "gemma-4-31b-it",
+                "gemma-4-26b-a4b-it",
+                "gemini-2.5-pro",
+            ],
         }
 
     def list_providers(self) -> list[str]:
@@ -65,7 +69,7 @@ class AIService:
 
     async def chat(self, payload: ChatRequest) -> tuple[str, str, str]:
         provider, models = self.list_models(payload.provider)
-        model = payload.model or models[0]
+        model = models[2]
         api_key = settings.gemini_api_key.strip()
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY is missing in backend environment")
