@@ -9,6 +9,7 @@ from app.api.routes_compile import router as compile_router
 from app.api.routes_editor import router as editor_router
 from app.api.routes_sessions import router as sessions_router
 from app.api.routes_uploads import router as uploads_router
+from app.api.routes_users import router as users_router
 from app.core.config import settings
 
 app = FastAPI(title=settings.app_name)
@@ -27,6 +28,7 @@ app.include_router(compile_router)
 app.include_router(editor_router)
 app.include_router(sessions_router)
 app.include_router(uploads_router)
+app.include_router(users_router)
 artifacts_dir = Path(settings.storage_dir) / "compile_artifacts"
 artifacts_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/artifacts", StaticFiles(directory=artifacts_dir), name="artifacts")

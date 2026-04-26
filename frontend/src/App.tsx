@@ -1,15 +1,14 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Mic, Square } from "lucide-react";
+import { Mic, Redo2, Save, Square, Trash2, Undo2 } from "lucide-react";
 import { EditorViewportCanvas } from "./components/viewport/EditorViewportCanvas";
 import { DisplayControls } from "./components/ui/DisplayControls";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
-import { DisplayMode, DotDensityMode, EditorTool, MeasureSubtool, PersistedEditorState, Unit } from "./components/viewport/editorTypes";
+import { DisplayMode, EditorTool, MeasureSubtool, PersistedEditorState, Unit } from "./components/viewport/editorTypes";
 
 type ChatRole = "user" | "assistant";
 type ChatEntry = { role: ChatRole; content: string };
-type GenerationMode = "cad_edit" | "text_to_3d";
 type Vec3 = [number, number, number];
 type EditorControlPoint = {
   id: string;
@@ -47,6 +46,20 @@ type SpeechRecognitionInstance = {
 type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
 
 const DEFAULT_SESSION_ID = "default";
+const LOCAL_USER_ID_KEY = "mesh_studio_user_id";
+
+const getOrCreateLocalUserId = () => {
+  if (typeof window === "undefined") {
+    return "local-user-server";
+  }
+  const existing = window.localStorage.getItem(LOCAL_USER_ID_KEY);
+  if (existing && existing.trim().length > 0) {
+    return existing;
+  }
+  const generated = `local-${crypto.randomUUID()}`;
+  window.localStorage.setItem(LOCAL_USER_ID_KEY, generated);
+  return generated;
+};
 
 export default function App() {
   const [draft, setDraft] = useState("");
@@ -59,13 +72,13 @@ export default function App() {
   ]);
   const [provider, setProvider] = useState("gemini");
   const [model, setModel] = useState("gemini-2.5-pro");
-  const [generationMode, setGenerationMode] = useState<GenerationMode>("cad_edit");
   const [isSending, setIsSending] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [compileStatus, setCompileStatus] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [compilePreviewUrl, setCompilePreviewUrl] = useState<string | null>(null);
   const [compileModelUrl, setCompileModelUrl] = useState<string | null>(null);
   const [compileModelRotation, setCompileModelRotation] = useState<
@@ -77,10 +90,10 @@ export default function App() {
   const [activeTool, setActiveTool] = useState<EditorTool>("orbit");
   const [measurementUnit, setMeasurementUnit] = useState<Unit>("mm");
   const [displayMode, setDisplayMode] = useState<DisplayMode>("solid");
-  const [dotDensityMode, setDotDensityMode] = useState<DotDensityMode>("dense");
   const [measureSubtool, setMeasureSubtool] = useState<MeasureSubtool>("bounding_dimensions");
   const [editorState, setEditorState] = useState<EditorStatePayload | null>(null);
   const [clearMeasureNonce, setClearMeasureNonce] = useState(0);
+  const [userId, setUserId] = useState<string>("local-user");
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const testFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -90,6 +103,10 @@ export default function App() {
     () => process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000",
     [],
   );
+
+  useEffect(() => {
+    setUserId(getOrCreateLocalUserId());
+  }, []);
 
   useEffect(() => {
     const loadModelMeta = async () => {
@@ -133,7 +150,6 @@ export default function App() {
         setActiveTool(data.active_tool ?? (data.mode as EditorTool) ?? "orbit");
         setMeasurementUnit(data.unit);
         setDisplayMode(data.display_mode ?? "solid");
-        setDotDensityMode(data.dot_density_mode ?? "dense");
         setMeasureSubtool(data.measure_subtool ?? "bounding_dimensions");
       } catch {
         // Editor endpoints might not exist yet during local startup.
@@ -201,12 +217,6 @@ export default function App() {
     setError("Compile polling timed out.");
   };
 
-  const handleRefreshCompile = () => {
-    if (latestCompileJobId) {
-      void pollCompileJob(latestCompileJobId);
-    }
-  };
-
   const handleExportEditedModel = () => {
     if (!exportEditedMesh) {
       setError("No editable model is loaded yet.");
@@ -226,6 +236,38 @@ export default function App() {
     link.click();
     link.remove();
     URL.revokeObjectURL(objectUrl);
+  };
+
+  const handleSaveModel = async () => {
+    if (!latestCompileJobId) {
+      setError("No compiled model to save yet.");
+      return;
+    }
+    try {
+      setSaveStatus("saving...");
+      setError(null);
+      const response = await fetch(`${apiBase}/users/${userId}/artifacts/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ compile_job_id: latestCompileJobId }),
+      });
+      if (!response.ok) {
+        let detail = "";
+        try {
+          const body = (await response.json()) as { detail?: string };
+          detail = body.detail ? `: ${body.detail}` : "";
+        } catch {
+          // ignore
+        }
+        throw new Error(`Save failed with status ${response.status}${detail}`);
+      }
+      const result = (await response.json()) as { message?: string };
+      setSaveStatus(result.message ?? "saved");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to save model.";
+      setSaveStatus("save failed");
+      setError(message);
+    }
   };
 
   const handleEditorStateChange = (payload: EditorStatePayload) => {
@@ -254,6 +296,10 @@ export default function App() {
 
   const handleLoadTestModel = () => {
     testFileInputRef.current?.click();
+  };
+
+  const triggerEditorAction = (action: "undo" | "redo" | "delete") => {
+    window.dispatchEvent(new CustomEvent(`meshstudio:${action}`));
   };
 
   const handleTestFilePicked = (event: ChangeEvent<HTMLInputElement>) => {
@@ -308,6 +354,8 @@ export default function App() {
     setError(null);
     setCompileStatus("preparing...");
     setCompilePreviewUrl(null);
+    const isFirstUserPrompt = nextMessages.filter((msg) => msg.role === "user").length === 1;
+    const generationMode = isFirstUserPrompt ? "text_to_3d" : "cad_edit";
 
     try {
       const response = await fetch(`${apiBase}/ai/chat`, {
@@ -317,6 +365,7 @@ export default function App() {
         },
         body: JSON.stringify({
           session_id: DEFAULT_SESSION_ID,
+          user_id: userId,
           generation_mode: generationMode,
           current_code: generationMode === "text_to_3d" ? null : undefined,
           provider,
@@ -369,6 +418,7 @@ export default function App() {
       }
       if (data.compile_job_id) {
         setLatestCompileJobId(data.compile_job_id);
+        setSaveStatus(null);
         void pollCompileJob(data.compile_job_id);
       }
     } catch (err) {
@@ -381,50 +431,6 @@ export default function App() {
       ]);
     } finally {
       setIsSending(false);
-    }
-  };
-
-  const handleSpeakLatestReply = async () => {
-    if (isSpeaking) {
-      return;
-    }
-    const lastAssistantMessage = [...messages]
-      .reverse()
-      .find((entry) => entry.role === "assistant" && entry.content.trim().length > 0);
-    if (!lastAssistantMessage) {
-      setError("No assistant reply available to narrate yet.");
-      return;
-    }
-    setIsSpeaking(true);
-    setError(null);
-    try {
-      const response = await fetch(`${apiBase}/ai/speak`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: lastAssistantMessage.content.slice(0, 1400),
-        }),
-      });
-      if (!response.ok) {
-        let detail = "";
-        try {
-          const errorBody = (await response.json()) as { detail?: string };
-          detail = errorBody.detail ? `: ${errorBody.detail}` : "";
-        } catch {
-          // Ignore non-JSON error body.
-        }
-        throw new Error(`Speech generation failed with status ${response.status}${detail}`);
-      }
-      const audioBlob = await response.blob();
-      const objectUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(objectUrl);
-      audio.onended = () => URL.revokeObjectURL(objectUrl);
-      void audio.play();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown speech generation error";
-      setError(message);
-    } finally {
-      setIsSpeaking(false);
     }
   };
 
@@ -497,60 +503,89 @@ export default function App() {
     <main className="app-shell">
       <section className="viewport-pane">
         <div className="toolbar">
-          <button
-            type="button"
-            className={`toolbar-btn toolbar-btn-text ${activeTool === "orbit" ? "active" : ""}`}
-            onClick={() => setActiveTool("orbit")}
-          >
-            Orbit
-          </button>
-          <button
-            type="button"
-            className={`toolbar-btn toolbar-btn-text ${activeTool === "edit" ? "active" : ""}`}
-            onClick={() => setActiveTool("edit")}
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            className={`toolbar-btn toolbar-btn-text ${activeTool === "measure" ? "active" : ""}`}
-            onClick={() => setActiveTool("measure")}
-          >
-            Measure
-          </button>
-          <span className="toolbar-divider" />
-          <DisplayControls
-            displayMode={displayMode}
-            dotDensityMode={dotDensityMode}
-            measureSubtool={measureSubtool}
-            onDisplayModeChange={setDisplayMode}
-            onDotDensityModeChange={setDotDensityMode}
-            onMeasureSubtoolChange={setMeasureSubtool}
-          />
-          <span className="toolbar-divider" />
-          <button
-            type="button"
-            className="toolbar-btn toolbar-btn-text"
-            onClick={() => setClearMeasureNonce((prev) => prev + 1)}
-          >
-            Clear Measure
-          </button>
-          <button
-            type="button"
-            className="toolbar-btn toolbar-btn-text"
-            onClick={handleLoadPrebuiltModel}
-            title="Load prebuilt cube model"
-          >
-            Load Prebuilt
-          </button>
-          <button
-            type="button"
-            className="toolbar-btn toolbar-btn-text"
-            onClick={handleLoadTestModel}
-            title="Load a local STL model for testing"
-          >
-            Test
-          </button>
+          <div className="toolbar-group">
+            <button
+              type="button"
+              className={`toolbar-btn toolbar-btn-text ${activeTool === "orbit" ? "active" : ""}`}
+              onClick={() => setActiveTool("orbit")}
+            >
+              Orbit
+            </button>
+            <button
+              type="button"
+              className={`toolbar-btn toolbar-btn-text ${activeTool === "edit" ? "active" : ""}`}
+              onClick={() => setActiveTool("edit")}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              className={`toolbar-btn toolbar-btn-text ${activeTool === "measure" ? "active" : ""}`}
+              onClick={() => setActiveTool("measure")}
+            >
+              Measure
+            </button>
+          </div>
+          <div className="toolbar-group">
+            <DisplayControls
+              displayMode={displayMode}
+              measureSubtool={measureSubtool}
+              onDisplayModeChange={setDisplayMode}
+              onMeasureSubtoolChange={setMeasureSubtool}
+            />
+          </div>
+          <div className="toolbar-group">
+            <button
+              type="button"
+              className="toolbar-btn toolbar-btn-text"
+              onClick={() => setClearMeasureNonce((prev) => prev + 1)}
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn toolbar-btn-text"
+              onClick={handleLoadPrebuiltModel}
+              title="Load prebuilt cube model"
+            >
+              Prebuilt
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn toolbar-btn-text"
+              onClick={handleLoadTestModel}
+              title="Import a local STL model"
+            >
+              Import
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={() => triggerEditorAction("undo")}
+              title="Undo"
+              aria-label="Undo"
+            >
+              <Undo2 size={14} />
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={() => triggerEditorAction("redo")}
+              title="Redo"
+              aria-label="Redo"
+            >
+              <Redo2 size={14} />
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={() => triggerEditorAction("delete")}
+              title="Delete selected"
+              aria-label="Delete selected"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
           <input
             ref={testFileInputRef}
             type="file"
@@ -558,23 +593,24 @@ export default function App() {
             onChange={handleTestFilePicked}
             style={{ display: "none" }}
           />
-          <span className="toolbar-divider" />
-          <Select value={measurementUnit} onValueChange={(value: string) => setMeasurementUnit(value as Unit)}>
-            <SelectTrigger aria-label="Unit">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="mm">mm</SelectItem>
-                <SelectItem value="cm">cm</SelectItem>
-                <SelectItem value="in">in</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+          <div className="toolbar-group">
+            <Select value={measurementUnit} onValueChange={(value: string) => setMeasurementUnit(value as Unit)}>
+              <SelectTrigger aria-label="Unit">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="mm">mm</SelectItem>
+                  <SelectItem value="cm">cm</SelectItem>
+                  <SelectItem value="in">in</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
           <span className="toolbar-spacer" />
           <button
             type="button"
-            className="toolbar-btn toolbar-btn-text"
+            className="toolbar-btn toolbar-btn-text toolbar-btn-primary"
             onClick={handleExportEditedModel}
             disabled={!exportEditedMesh}
             title="Export current edited model as STL"
@@ -589,7 +625,7 @@ export default function App() {
           activeTool={activeTool}
           unit={measurementUnit}
           displayMode={displayMode}
-          dotDensityMode={dotDensityMode}
+          dotDensityMode="dense"
           measureSubtool={measureSubtool}
           persistedEditorState={editorState}
           onEditorStateChange={handleEditorStateChange}
@@ -603,33 +639,14 @@ export default function App() {
           AI Chat
           <button
             type="button"
-            className="chat-refresh"
-            onClick={() =>
-              setGenerationMode((prev) => (prev === "cad_edit" ? "text_to_3d" : "cad_edit"))
-            }
-            disabled={isSending}
-            title="Toggle between CAD edit mode and text-to-3D mode"
-          >
-            {generationMode === "text_to_3d" ? "Mode: Text→3D" : "Mode: CAD Edit"}
-          </button>
-          <button
-            type="button"
-            className="chat-refresh"
-            onClick={handleRefreshCompile}
+            className="chat-refresh chat-save-btn chat-header-action"
+            onClick={() => void handleSaveModel()}
             disabled={!latestCompileJobId || isSending}
+            title="Save current model to Supabase"
           >
-            Refresh
+            <Save size={13} />
+            {saveStatus === "saving..." ? "Saving..." : "Save"}
           </button>
-          <button
-            type="button"
-            className="chat-refresh"
-            onClick={handleSpeakLatestReply}
-            disabled={isSpeaking || isSending}
-            title="Narrate latest assistant message"
-          >
-            {isSpeaking ? "Speaking..." : "Speak"}
-          </button>
-          <span className="chat-badge">{`${provider} · ${model}`}</span>
         </header>
         <div className="chat-messages">
           {messages.map((msg, idx) => (
@@ -644,11 +661,7 @@ export default function App() {
           {compileStatus ? (
             <div className="compile-status">Compile: {compileStatus}</div>
           ) : null}
-          <div className="compile-debug-rotation">
-            Rotation: [{compileModelRotation[0].toFixed(3)}, {compileModelRotation[1].toFixed(3)}
-            , {compileModelRotation[2].toFixed(3)}]
-          </div>
-          <div className="compile-debug-rotation">Color: {compileModelColor}</div>
+          {saveStatus ? <div className="compile-status">Save: {saveStatus}</div> : null}
           {compilePreviewUrl ? (
             <img src={compilePreviewUrl} className="compile-preview" alt="compile preview" />
           ) : null}
@@ -657,11 +670,7 @@ export default function App() {
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder={
-              generationMode === "text_to_3d"
-                ? "Describe a 3D object to generate..."
-                : "Ask the assistant to edit your current model..."
-            }
+            placeholder="Describe your model or ask for an edit..."
             className="chat-input"
             disabled={isSending}
           />
