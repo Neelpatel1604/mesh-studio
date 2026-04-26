@@ -53,6 +53,8 @@ const DEFAULT_STL_ROTATION: [number, number, number] = [-1.57079632679, 0, 0];
 const DEFAULT_MODEL_ROTATION: [number, number, number] = [0, 0, 0];
 const DEFAULT_MODEL_POSITION: [number, number, number] = [0, 0, 0];
 const DEFAULT_MODEL_SCALE: [number, number, number] = [1, 1, 1];
+const normalizeDisplayMode = (value: DisplayMode | null | undefined): DisplayMode =>
+  value === "solid_wire" ? "solid" : (value ?? "solid");
 const DEFAULT_WELCOME_MESSAGES: ChatEntry[] = [
   {
     role: "assistant",
@@ -106,6 +108,12 @@ type PersistedUiState = {
   measureSubtool?: MeasureSubtool;
   transformPanelPosition?: { x: number; y: number } | null;
 };
+
+const measurementUnitItems: Array<{ label: string; value: Unit }> = [
+  { label: "mm", value: "mm" },
+  { label: "cm", value: "cm" },
+  { label: "in", value: "in" },
+];
 
 export default function App({
   initialSessionId = DEFAULT_SESSION_ID,
@@ -210,7 +218,7 @@ export default function App({
       if (typeof state.latestCompileJobId === "string" || state.latestCompileJobId === null) setLatestCompileJobId(state.latestCompileJobId ?? null);
       if (state.activeTool) setActiveTool(state.activeTool);
       if (state.measurementUnit) setMeasurementUnit(state.measurementUnit);
-      if (state.displayMode) setDisplayMode(state.displayMode);
+      if (state.displayMode) setDisplayMode(normalizeDisplayMode(state.displayMode));
       if (state.measureSubtool) setMeasureSubtool(state.measureSubtool);
       if (state.transformPanelPosition) setTransformPanelPosition(state.transformPanelPosition);
     } catch {
@@ -359,7 +367,7 @@ export default function App({
         setEditorState(data);
         setActiveTool(data.active_tool ?? (data.mode as EditorTool) ?? "orbit");
         setMeasurementUnit(data.unit);
-        setDisplayMode(data.display_mode ?? "solid");
+        setDisplayMode(normalizeDisplayMode(data.display_mode));
         setMeasureSubtool(data.measure_subtool ?? "bounding_dimensions");
       } catch {
         // Editor endpoints might not exist yet during local startup.
@@ -1040,15 +1048,23 @@ export default function App({
             style={{ display: "none" }}
           />
           <div className="toolbar-group">
-            <Select value={measurementUnit} onValueChange={(value: string) => setMeasurementUnit(value as Unit)}>
+            <Select
+              value={measurementUnit}
+              onValueChange={(value) => {
+                if (!value) return;
+                setMeasurementUnit(value as Unit);
+              }}
+            >
               <SelectTrigger aria-label="Unit">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  <SelectItem value="mm">mm</SelectItem>
-                  <SelectItem value="cm">cm</SelectItem>
-                  <SelectItem value="in">in</SelectItem>
+                  {measurementUnitItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
                 </SelectGroup>
               </SelectContent>
             </Select>
@@ -1209,19 +1225,27 @@ export default function App({
             <div className="model-transform-title">Section Colors</div>
             <div className="model-transform-row model-transform-row-color">
               <span className="model-transform-label">Part</span>
-              <select
-                className="model-transform-select"
+              <Select
                 value={selectedSectionId}
-                onChange={(e) => setSelectedSectionId(e.target.value)}
-                aria-label="Select section to color"
+                onValueChange={(value) => {
+                  if (!value) return;
+                  setSelectedSectionId(value);
+                }}
               >
-                <option value="all">All</option>
-                {modelSectionOptions.map((section) => (
-                  <option key={section.id} value={section.id}>
-                    {section.label}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="w-full" aria-label="Select section to color">
+                  <SelectValue placeholder="Part" />
+                </SelectTrigger>
+                <SelectContent align="start">
+                  <SelectGroup>
+                    <SelectItem value="all">All</SelectItem>
+                    {modelSectionOptions.map((section) => (
+                      <SelectItem key={section.id} value={section.id}>
+                        {section.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
               <input
                 type="color"
                 className="model-transform-color"

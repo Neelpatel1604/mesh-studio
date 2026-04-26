@@ -8,6 +8,11 @@ type DisplayControlsProps = {
   onMeasureSubtoolChange: (value: MeasureSubtool) => void;
 };
 
+const displayModeItems: Array<{ label: string; value: DisplayMode }> = [
+  { label: "Solid", value: "solid" },
+  { label: "Wireframe", value: "wireframe" },
+];
+
 export function DisplayControls({
   displayMode,
   measureSubtool,
@@ -16,19 +21,33 @@ export function DisplayControls({
 }: DisplayControlsProps) {
   return (
     <>
-      <Select value={displayMode} onValueChange={(value: string) => onDisplayModeChange(value as DisplayMode)}>
+      <Select
+        value={displayMode}
+        onValueChange={(value) => {
+          if (!value) return;
+          onDisplayModeChange(value as DisplayMode);
+        }}
+      >
         <SelectTrigger aria-label="Display mode">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
-            <SelectItem value="solid">Solid</SelectItem>
-            <SelectItem value="wireframe">Wireframe</SelectItem>
-            <SelectItem value="solid_wire">Solid+Wire</SelectItem>
+            {displayModeItems.map((item) => (
+              <SelectItem key={item.value} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
           </SelectGroup>
         </SelectContent>
       </Select>
-      <Select value={measureSubtool} onValueChange={(value: string) => onMeasureSubtoolChange(value as MeasureSubtool)}>
+      <Select
+        value={measureSubtool}
+        onValueChange={(value) => {
+          if (!value) return;
+          onMeasureSubtoolChange(value as MeasureSubtool);
+        }}
+      >
         <SelectTrigger aria-label="Measure subtool">
           <SelectValue />
         </SelectTrigger>
