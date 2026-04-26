@@ -1,7 +1,7 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Mic, Redo2, Save, Square, Trash2, Undo2 } from "lucide-react";
+import { ChangeEvent, FormEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, Clock3, Mic, Plus, Redo2, Save, Square, Trash2, Undo2 } from "lucide-react";
 import Link from "next/link";
 import { EditorViewportCanvas } from "./components/viewport/EditorViewportCanvas";
 import { DisplayControls } from "./components/ui/DisplayControls";
@@ -48,10 +48,18 @@ type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
 
 const DEFAULT_SESSION_ID = "default";
 const LOCAL_USER_ID_KEY = "mesh_studio_user_id";
+const LOCAL_UI_STATE_PREFIX = "mesh_studio_ui_state";
 const DEFAULT_STL_ROTATION: [number, number, number] = [-1.57079632679, 0, 0];
 const DEFAULT_MODEL_ROTATION: [number, number, number] = [0, 0, 0];
 const DEFAULT_MODEL_POSITION: [number, number, number] = [0, 0, 0];
 const DEFAULT_MODEL_SCALE: [number, number, number] = [1, 1, 1];
+const DEFAULT_WELCOME_MESSAGES: ChatEntry[] = [
+  {
+    role: "assistant",
+    content:
+      "Hi! I am in 3D CAD mode. Tell me what object or part you want to model, with size/details.",
+  },
+];
 
 const getOrCreateLocalUserId = () => {
   if (typeof window === "undefined") {
@@ -72,6 +80,32 @@ type AppProps = {
   initialCompileStatus?: string | null;
   initialModelRotation?: [number, number, number] | null;
 };
+type ModelSectionOption = {
+  id: string;
+  label: string;
+};
+type PersistedUiState = {
+  draft?: string;
+  messages?: ChatEntry[];
+  provider?: string;
+  model?: string;
+  compileStatus?: string | null;
+  saveStatus?: string | null;
+  compilePreviewUrl?: string | null;
+  compileModelUrl?: string | null;
+  compileModelRotation?: [number, number, number];
+  compileModelPosition?: [number, number, number];
+  compileModelScale?: [number, number, number];
+  compileModelColor?: string;
+  selectedSectionId?: string;
+  sectionColorMap?: Record<string, string>;
+  latestCompileJobId?: string | null;
+  activeTool?: EditorTool;
+  measurementUnit?: Unit;
+  displayMode?: DisplayMode;
+  measureSubtool?: MeasureSubtool;
+  transformPanelPosition?: { x: number; y: number } | null;
+};
 
 export default function App({
   initialSessionId = DEFAULT_SESSION_ID,
@@ -80,13 +114,7 @@ export default function App({
   initialModelRotation = null,
 }: AppProps) {
   const [draft, setDraft] = useState("");
-  const [messages, setMessages] = useState<ChatEntry[]>([
-    {
-      role: "assistant",
-      content:
-        "Hi! I am in 3D CAD mode. Tell me what object or part you want to model, with size/details.",
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatEntry[]>(DEFAULT_WELCOME_MESSAGES);
   const [provider, setProvider] = useState("gemini");
   const [model, setModel] = useState("gemini-2.5-pro");
   const [isSending, setIsSending] = useState(false);
@@ -108,6 +136,15 @@ export default function App({
     DEFAULT_MODEL_SCALE,
   );
   const [compileModelColor, setCompileModelColor] = useState("#b5b5b5");
+  const [modelSectionOptions, setModelSectionOptions] = useState<ModelSectionOption[]>([]);
+  const [selectedSectionId, setSelectedSectionId] = useState<string>("all");
+  const [sectionColorMap, setSectionColorMap] = useState<Record<string, string>>({});
+  const [transformPanelPosition, setTransformPanelPosition] = useState<{ x: number; y: number }>({
+    x: 12,
+    y: 54,
+  });
+  const [isTransformPanelExpanded, setIsTransformPanelExpanded] = useState(true);
+  const [isDraggingTransformPanel, setIsDraggingTransformPanel] = useState(false);
   const [latestCompileJobId, setLatestCompileJobId] = useState<string | null>(null);
   const [exportEditedMesh, setExportEditedMesh] = useState<(() => Blob | null) | null>(null);
   const [activeTool, setActiveTool] = useState<EditorTool>("orbit");
@@ -120,18 +157,166 @@ export default function App({
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const testFileInputRef = useRef<HTMLInputElement | null>(null);
+  const viewportPaneRef = useRef<HTMLElement | null>(null);
+  const dragTransformPanelRef = useRef<{
+    active: boolean;
+    pointerOffsetX: number;
+    pointerOffsetY: number;
+  }>({
+    active: false,
+    pointerOffsetX: 0,
+    pointerOffsetY: 0,
+  });
+  const hasRestoredUiStateRef = useRef(false);
 
   const apiBase = useMemo(
     () => process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000",
     [],
   );
   const sessionId = initialSessionId.trim() || DEFAULT_SESSION_ID;
+  const uiStateStorageKey = `${LOCAL_UI_STATE_PREFIX}:${sessionId}`;
   const toDegrees = (value: number) => (value * 180) / Math.PI;
   const toRadians = (value: number) => (value * Math.PI) / 180;
 
   useEffect(() => {
     setUserId(getOrCreateLocalUserId());
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || hasRestoredUiStateRef.current) {
+      return;
+    }
+    hasRestoredUiStateRef.current = true;
+    const raw = window.localStorage.getItem(uiStateStorageKey);
+    if (!raw) {
+      return;
+    }
+    try {
+      const state = JSON.parse(raw) as PersistedUiState;
+      if (typeof state.draft === "string") setDraft(state.draft);
+      if (Array.isArray(state.messages) && state.messages.length > 0) setMessages(state.messages);
+      if (typeof state.provider === "string") setProvider(state.provider);
+      if (typeof state.model === "string") setModel(state.model);
+      if (typeof state.compileStatus === "string" || state.compileStatus === null) setCompileStatus(state.compileStatus ?? null);
+      if (typeof state.saveStatus === "string" || state.saveStatus === null) setSaveStatus(state.saveStatus ?? null);
+      if (typeof state.compilePreviewUrl === "string" || state.compilePreviewUrl === null) setCompilePreviewUrl(state.compilePreviewUrl ?? null);
+      if (typeof state.compileModelUrl === "string" || state.compileModelUrl === null) setCompileModelUrl(state.compileModelUrl ?? null);
+      if (Array.isArray(state.compileModelRotation) && state.compileModelRotation.length === 3) setCompileModelRotation(state.compileModelRotation);
+      if (Array.isArray(state.compileModelPosition) && state.compileModelPosition.length === 3) setCompileModelPosition(state.compileModelPosition);
+      if (Array.isArray(state.compileModelScale) && state.compileModelScale.length === 3) setCompileModelScale(state.compileModelScale);
+      if (typeof state.compileModelColor === "string") setCompileModelColor(state.compileModelColor);
+      if (typeof state.selectedSectionId === "string") setSelectedSectionId(state.selectedSectionId);
+      if (state.sectionColorMap && typeof state.sectionColorMap === "object") setSectionColorMap(state.sectionColorMap);
+      if (typeof state.latestCompileJobId === "string" || state.latestCompileJobId === null) setLatestCompileJobId(state.latestCompileJobId ?? null);
+      if (state.activeTool) setActiveTool(state.activeTool);
+      if (state.measurementUnit) setMeasurementUnit(state.measurementUnit);
+      if (state.displayMode) setDisplayMode(state.displayMode);
+      if (state.measureSubtool) setMeasureSubtool(state.measureSubtool);
+      if (state.transformPanelPosition) setTransformPanelPosition(state.transformPanelPosition);
+    } catch {
+      // Ignore invalid stored UI state.
+    }
+  }, [uiStateStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !hasRestoredUiStateRef.current) {
+      return;
+    }
+    const state: PersistedUiState = {
+      draft,
+      messages,
+      provider,
+      model,
+      compileStatus,
+      saveStatus,
+      compilePreviewUrl,
+      compileModelUrl,
+      compileModelRotation,
+      compileModelPosition,
+      compileModelScale,
+      compileModelColor,
+      selectedSectionId,
+      sectionColorMap,
+      latestCompileJobId,
+      activeTool,
+      measurementUnit,
+      displayMode,
+      measureSubtool,
+      transformPanelPosition,
+    };
+    window.localStorage.setItem(uiStateStorageKey, JSON.stringify(state));
+  }, [
+    activeTool,
+    compileModelColor,
+    compileModelPosition,
+    compileModelRotation,
+    compileModelScale,
+    compileModelUrl,
+    compilePreviewUrl,
+    compileStatus,
+    displayMode,
+    draft,
+    latestCompileJobId,
+    measureSubtool,
+    measurementUnit,
+    messages,
+    model,
+    provider,
+    saveStatus,
+    sectionColorMap,
+    selectedSectionId,
+    transformPanelPosition,
+    uiStateStorageKey,
+  ]);
+
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      if (!dragTransformPanelRef.current.active) {
+        return;
+      }
+      const pane = viewportPaneRef.current;
+      if (!pane) {
+        return;
+      }
+      const paneRect = pane.getBoundingClientRect();
+      const rawX = event.clientX - paneRect.left - dragTransformPanelRef.current.pointerOffsetX;
+      const rawY = event.clientY - paneRect.top - dragTransformPanelRef.current.pointerOffsetY;
+      const panelWidth = 330;
+      const panelHeight = 380;
+      const maxX = Math.max(8, paneRect.width - panelWidth - 8);
+      const maxY = Math.max(8, paneRect.height - panelHeight - 8);
+      setTransformPanelPosition({
+        x: Math.min(Math.max(8, rawX), maxX),
+        y: Math.min(Math.max(8, rawY), maxY),
+      });
+    };
+    const onPointerUp = () => {
+      dragTransformPanelRef.current.active = false;
+      setIsDraggingTransformPanel(false);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, []);
+
+  const handleTransformPanelPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pane = viewportPaneRef.current;
+    if (!pane) {
+      return;
+    }
+    const paneRect = pane.getBoundingClientRect();
+    dragTransformPanelRef.current.active = true;
+    setIsDraggingTransformPanel(true);
+    dragTransformPanelRef.current.pointerOffsetX = event.clientX - paneRect.left - transformPanelPosition.x;
+    dragTransformPanelRef.current.pointerOffsetY = event.clientY - paneRect.top - transformPanelPosition.y;
+  };
+
+  const toggleTransformPanel = () => {
+    setIsTransformPanelExpanded((prev) => !prev);
+  };
 
   useEffect(() => {
     const loadModelMeta = async () => {
@@ -204,6 +389,9 @@ export default function App({
     setCompileStatus(initialCompileStatus ?? "loaded artifact model");
     setCompileModelPosition(DEFAULT_MODEL_POSITION);
     setCompileModelScale(DEFAULT_MODEL_SCALE);
+    setModelSectionOptions([]);
+    setSelectedSectionId("all");
+    setSectionColorMap({});
   }, [initialCompileStatus, initialModelRotation, initialModelUrl]);
 
   const extractColorHintFromScad = (scad?: string) => {
@@ -287,13 +475,58 @@ export default function App({
   };
 
   const handleSaveModel = async () => {
-    if (!latestCompileJobId) {
-      setError("No compiled model to save yet.");
+    if (!latestCompileJobId && !exportEditedMesh) {
+      setError("No model to save yet.");
       return;
     }
     try {
       setSaveStatus("saving...");
       setError(null);
+      if (exportEditedMesh) {
+        const editedBlob = exportEditedMesh();
+        if (!editedBlob) {
+          throw new Error("Unable to export edited model for saving.");
+        }
+        const formData = new FormData();
+        formData.append("file", new File([editedBlob], "mesh-studio-edited.stl", { type: "model/stl" }));
+        const uploadResp = await fetch(`${apiBase}/uploads/meshes`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!uploadResp.ok) {
+          let detail = "";
+          try {
+            const body = (await uploadResp.json()) as { detail?: string };
+            detail = body.detail ? `: ${body.detail}` : "";
+          } catch {
+            // ignore non-JSON body
+          }
+          throw new Error(`Save upload failed with status ${uploadResp.status}${detail}`);
+        }
+        const uploadBody = (await uploadResp.json()) as { file_id: string; file_url: string };
+        const saveUploadResp = await fetch(`${apiBase}/users/${userId}/artifacts/save-upload`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            file_id: uploadBody.file_id,
+            file_url: uploadBody.file_url,
+          }),
+        });
+        if (!saveUploadResp.ok) {
+          let detail = "";
+          try {
+            const body = (await saveUploadResp.json()) as { detail?: string };
+            detail = body.detail ? `: ${body.detail}` : "";
+          } catch {
+            // ignore
+          }
+          throw new Error(`Save failed with status ${saveUploadResp.status}${detail}`);
+        }
+        const result = (await saveUploadResp.json()) as { message?: string };
+        setSaveStatus(result.message ?? "saved");
+        return;
+      }
+
       const response = await fetch(`${apiBase}/users/${userId}/artifacts/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -361,6 +594,9 @@ export default function App({
     setExportEditedMesh(null);
     setCompileModelPosition(DEFAULT_MODEL_POSITION);
     setCompileModelScale(DEFAULT_MODEL_SCALE);
+    setModelSectionOptions([]);
+    setSelectedSectionId("all");
+    setSectionColorMap({});
   };
 
   const handleTestFilePicked = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -392,6 +628,9 @@ export default function App({
       setCompileModelRotation(DEFAULT_STL_ROTATION);
       setCompileModelPosition(DEFAULT_MODEL_POSITION);
       setCompileModelScale(DEFAULT_MODEL_SCALE);
+      setModelSectionOptions([]);
+      setSelectedSectionId("all");
+      setSectionColorMap({});
       setCompilePreviewUrl(null);
       setLatestCompileJobId(null);
       setSaveStatus("saving...");
@@ -638,9 +877,77 @@ export default function App({
     setCompileModelScale(DEFAULT_MODEL_SCALE);
   };
 
+  const handleCenterModelPosition = () => {
+    setCompileModelPosition(DEFAULT_MODEL_POSITION);
+  };
+
+  const handleModelSectionsChange = useCallback(
+    (sections: ModelSectionOption[]) => {
+      setModelSectionOptions(sections);
+      setSectionColorMap((prev) => {
+        const valid = new Set(sections.map((section) => section.id));
+        const next: Record<string, string> = {};
+        for (const [sectionId, color] of Object.entries(prev)) {
+          if (valid.has(sectionId)) {
+            next[sectionId] = color;
+          }
+        }
+        return next;
+      });
+      setSelectedSectionId((prev) => {
+        if (prev === "all") {
+          return prev;
+        }
+        return sections.some((section) => section.id === prev) ? prev : "all";
+      });
+    },
+    [],
+  );
+
+  const activeSectionColor =
+    selectedSectionId === "all"
+      ? compileModelColor
+      : sectionColorMap[selectedSectionId] ?? compileModelColor;
+
+  const handleSectionColorChange = (color: string) => {
+    if (selectedSectionId === "all") {
+      setCompileModelColor(color);
+      return;
+    }
+    setSectionColorMap((prev) => ({
+      ...prev,
+      [selectedSectionId]: color,
+    }));
+  };
+
+  const handleStartNew = () => {
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(uiStateStorageKey);
+    }
+    setDraft("");
+    setMessages(DEFAULT_WELCOME_MESSAGES);
+    setError(null);
+    setCompileStatus(null);
+    setSaveStatus(null);
+    setCompilePreviewUrl(null);
+    setCompileModelUrl(null);
+    setCompileModelRotation(DEFAULT_MODEL_ROTATION);
+    setCompileModelPosition(DEFAULT_MODEL_POSITION);
+    setCompileModelScale(DEFAULT_MODEL_SCALE);
+    setCompileModelColor("#b5b5b5");
+    setModelSectionOptions([]);
+    setSelectedSectionId("all");
+    setSectionColorMap({});
+    setLatestCompileJobId(null);
+    setActiveTool("orbit");
+    setMeasurementUnit("mm");
+    setDisplayMode("solid");
+    setMeasureSubtool("bounding_dimensions");
+  };
+
   return (
     <main className="app-shell">
-      <section className="viewport-pane">
+      <section className="viewport-pane" ref={viewportPaneRef}>
         <div className="toolbar">
           <div className="toolbar-group">
             <button
@@ -763,6 +1070,7 @@ export default function App({
           modelPosition={compileModelPosition}
           modelScale={compileModelScale}
           modelColor={compileModelColor}
+          modelSectionColors={sectionColorMap}
           activeTool={activeTool}
           unit={measurementUnit}
           displayMode={displayMode}
@@ -771,11 +1079,35 @@ export default function App({
           persistedEditorState={editorState}
           onEditorStateChange={handleEditorStateChange}
           onExportMeshReady={handleExportMeshReady}
+          onModelSectionsChange={handleModelSectionsChange}
           clearMeasureNonce={clearMeasureNonce}
         />
         {compileModelUrl ? (
-          <div className="model-transform-panel">
-            <div className="model-transform-title">Transform</div>
+          <div
+            className={`model-transform-panel ${isDraggingTransformPanel ? "dragging" : ""}`}
+            style={{ left: transformPanelPosition.x, top: transformPanelPosition.y }}
+          >
+            <div
+              className="model-transform-drag-handle"
+              onPointerDown={handleTransformPanelPointerDown}
+              title="Drag to move panel"
+            >
+              <span>Transform</span>
+              <button
+                type="button"
+                className="model-transform-toggle"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleTransformPanel();
+                }}
+                aria-label={isTransformPanelExpanded ? "Collapse transform panel" : "Expand transform panel"}
+                title={isTransformPanelExpanded ? "Collapse" : "Expand"}
+              >
+                {isTransformPanelExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              </button>
+            </div>
+            {isTransformPanelExpanded ? (
+              <>
             <div className="model-transform-row">
               <span className="model-transform-label">Pos</span>
               <input
@@ -863,10 +1195,43 @@ export default function App({
             <button
               type="button"
               className="toolbar-btn toolbar-btn-text"
+              onClick={handleCenterModelPosition}
+            >
+              Center XYZ
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn toolbar-btn-text"
               onClick={handleResetModelTransform}
             >
               Reset Transform
             </button>
+            <div className="model-transform-title">Section Colors</div>
+            <div className="model-transform-row model-transform-row-color">
+              <span className="model-transform-label">Part</span>
+              <select
+                className="model-transform-select"
+                value={selectedSectionId}
+                onChange={(e) => setSelectedSectionId(e.target.value)}
+                aria-label="Select section to color"
+              >
+                <option value="all">All</option>
+                {modelSectionOptions.map((section) => (
+                  <option key={section.id} value={section.id}>
+                    {section.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="color"
+                className="model-transform-color"
+                value={activeSectionColor}
+                onChange={(e) => handleSectionColorChange(e.target.value)}
+                aria-label="Section color"
+              />
+            </div>
+              </>
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -874,13 +1239,15 @@ export default function App({
       <aside className="chat-panel">
         <header className="chat-header">
           AI Chat
-          <Link
-            href={`/chat-history/${sessionId}?user_id=${encodeURIComponent(userId)}`}
-            className="chat-refresh"
-            title="Open chat history"
+          <button
+            type="button"
+            className="chat-refresh chat-save-btn"
+            onClick={handleStartNew}
+            title="Clear current session and start new chat"
           >
-            History
-          </Link>
+            <Plus size={12} />
+            New Chat
+          </button>
           <button
             type="button"
             className="chat-refresh chat-save-btn chat-header-action"
@@ -891,6 +1258,14 @@ export default function App({
             <Save size={13} />
             {saveStatus === "saving..." ? "Saving..." : "Save"}
           </button>
+          <Link
+            href={`/chat-history/${sessionId}?user_id=${encodeURIComponent(userId)}`}
+            className="chat-icon-btn"
+            title="Open chat history"
+            aria-label="Open chat history"
+          >
+            <Clock3 size={15} />
+          </Link>
         </header>
         <div className="chat-messages">
           {messages.map((msg, idx) => (
