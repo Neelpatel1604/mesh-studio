@@ -15,3 +15,14 @@ class UserArtifactRecord(BaseModel):
 class UserArtifactListResponse(BaseModel):
     user_id: str
     items: list[UserArtifactRecord] = Field(default_factory=list)
+
+
+class SaveUserArtifactRequest(BaseModel):
+    compile_job_id: str
+
+
+class SaveUserArtifactResponse(BaseModel):
+    user_id: str
+    compile_job_id: str
+    saved_to: str
+    message: str

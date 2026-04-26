@@ -7,6 +7,7 @@ import { STLExporter, STLLoader, ThreeMFLoader } from "three-stdlib";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { HudPanel } from "../ui/HudPanel";
 import { AxisGizmo } from "./AxisGizmo";
+import { AxisCameraSync, AxisCornerIndicator, type AxisCornerHandle } from "./AxisCornerIndicator";
 import { BoundsInfo, DisplayMode, DotDensityMode, EditorControlPoint, EditorTool, MeasureSubtool, PersistedEditorState, Unit } from "./editorTypes";
 import { InfiniteGrid } from "./InfiniteGrid";
 import { dragPlaneFromCamera, nearestVertexFromFace } from "./meshEditingUtils";
@@ -82,6 +83,11 @@ function EditableMeshPrimitive({
   setInteractionOwner: (owner: "camera" | "tool") => void;
   onMeasurePoint: (point: [number, number, number]) => void;
 }) {
+  type GeometrySnapshot = Array<{
+    mesh: Mesh;
+    positions: Float32Array;
+  }>;
+
   const groupRef = useRef<Group>(null);
   const { camera, gl } = useThree();
   const raycasterRef = useRef(new Raycaster());
@@ -109,6 +115,94 @@ function EditableMeshPrimitive({
   });
   const linkedVertexIndicesRef = useRef<number[]>([]);
   const measureDownRef = useRef<{ x: number; y: number; point: [number, number, number] } | null>(null);
+  const undoStackRef = useRef<GeometrySnapshot[]>([]);
+  const redoStackRef = useRef<GeometrySnapshot[]>([]);
+  const dragStartSnapshotRef = useRef<GeometrySnapshot | null>(null);
+
+  const captureSnapshot = () => {
+    const snapshot: GeometrySnapshot = [];
+    object.traverse((node) => {
+      const mesh = node as Mesh;
+      if (!mesh.isMesh) return;
+      const geometry = mesh.geometry as BufferGeometry;
+      const pos = geometry.getAttribute("position");
+      if (!pos) return;
+      snapshot.push({
+        mesh,
+        positions: new Float32Array(pos.array as ArrayLike<number>),
+      });
+    });
+    return snapshot;
+  };
+
+  const snapshotsDiffer = (a: GeometrySnapshot | null, b: GeometrySnapshot | null) => {
+    if (!a || !b) return false;
+    if (a.length !== b.length) return true;
+    for (let i = 0; i < a.length; i += 1) {
+      const ap = a[i].positions;
+      const bp = b[i].positions;
+      if (ap.length !== bp.length) return true;
+      for (let j = 0; j < ap.length; j += 1) {
+        if (Math.abs(ap[j] - bp[j]) > 1e-9) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  const syncOverlayPointsFromGeometry = () => {
+    for (const overlay of grabPointOverlays) {
+      const geometry = overlay.mesh.geometry as BufferGeometry;
+      const pos = geometry.getAttribute("position");
+      const overlayPos = overlay.geometry.getAttribute("position");
+      if (!pos || !overlayPos) continue;
+
+      if (overlay.denseBindings) {
+        for (let i = 0; i < overlay.denseBindings.length; i += 1) {
+          const binding = overlay.denseBindings[i];
+          const aBase = binding.a * 3;
+          const bBase = binding.b * 3;
+          const cBase = binding.c * 3;
+          const dBase = i * 3;
+          overlayPos.array[dBase] =
+            pos.array[aBase] * binding.wa + pos.array[bBase] * binding.wb + pos.array[cBase] * binding.wc;
+          overlayPos.array[dBase + 1] =
+            pos.array[aBase + 1] * binding.wa + pos.array[bBase + 1] * binding.wb + pos.array[cBase + 1] * binding.wc;
+          overlayPos.array[dBase + 2] =
+            pos.array[aBase + 2] * binding.wa + pos.array[bBase + 2] * binding.wb + pos.array[cBase + 2] * binding.wc;
+        }
+      } else {
+        for (let i = 0; i < overlay.vertexMap.length; i += 1) {
+          const sourceVertexIndex = overlay.vertexMap[i];
+          const srcBase = sourceVertexIndex * 3;
+          const dstBase = i * 3;
+          overlayPos.array[dstBase] = pos.array[srcBase];
+          overlayPos.array[dstBase + 1] = pos.array[srcBase + 1];
+          overlayPos.array[dstBase + 2] = pos.array[srcBase + 2];
+        }
+      }
+      overlayPos.needsUpdate = true;
+    }
+  };
+
+  const applySnapshot = (snapshot: GeometrySnapshot) => {
+    for (const item of snapshot) {
+      const geometry = item.mesh.geometry as BufferGeometry;
+      const pos = geometry.getAttribute("position");
+      if (!pos || pos.array.length !== item.positions.length) continue;
+      pos.array.set(item.positions);
+      pos.needsUpdate = true;
+      geometry.computeVertexNormals();
+    }
+    object.updateMatrixWorld(true);
+    groupRef.current?.updateMatrixWorld(true);
+    syncOverlayPointsFromGeometry();
+    setSelectedPoint(null);
+    setHoveredPoint(null);
+    onSelectionChange(null);
+    onDragDeltaChange(null);
+  };
 
   useEffect(() => {
     let editablePointCount = 0;
@@ -279,6 +373,39 @@ function EditableMeshPrimitive({
   useEffect(() => {
     onBoundsChange(bounds);
   }, [bounds, onBoundsChange]);
+
+  useEffect(() => {
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    dragStartSnapshotRef.current = null;
+  }, [object]);
+
+  useEffect(() => {
+    const onUndo = () => {
+      const stack = undoStackRef.current;
+      if (stack.length === 0) return;
+      const current = captureSnapshot();
+      const previous = stack.pop();
+      if (!previous) return;
+      redoStackRef.current.push(current);
+      applySnapshot(previous);
+    };
+    const onRedo = () => {
+      const stack = redoStackRef.current;
+      if (stack.length === 0) return;
+      const current = captureSnapshot();
+      const next = stack.pop();
+      if (!next) return;
+      undoStackRef.current.push(current);
+      applySnapshot(next);
+    };
+    window.addEventListener("meshstudio:undo", onUndo as EventListener);
+    window.addEventListener("meshstudio:redo", onRedo as EventListener);
+    return () => {
+      window.removeEventListener("meshstudio:undo", onUndo as EventListener);
+      window.removeEventListener("meshstudio:redo", onRedo as EventListener);
+    };
+  }, [grabPointOverlays]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -471,11 +598,24 @@ function EditableMeshPrimitive({
       onDragDeltaChange(null);
       setHoveredPoint(null);
       if (hadDrag) {
+        const before = dragStartSnapshotRef.current;
+        const after = captureSnapshot();
+        if (before && snapshotsDiffer(before, after)) {
+          undoStackRef.current.push(before);
+          if (undoStackRef.current.length > 50) {
+            undoStackRef.current.shift();
+          }
+          redoStackRef.current = [];
+        }
+        dragStartSnapshotRef.current = null;
         if (selectedPoint) {
           setReleasePoint(selectedPoint);
         }
         setSelectedPoint(null);
         onSelectionChange(null);
+      }
+      if (!hadDrag) {
+        dragStartSnapshotRef.current = null;
       }
       gl.domElement.style.cursor = "grab";
     };
@@ -488,6 +628,7 @@ function EditableMeshPrimitive({
   }, [axisLock, camera, gl, grabPointOverlays, onDragDeltaChange, onLinkedVertexCountChange, onSelectionChange, onSnapHintChange, selectedPoint, setInteractionOwner]);
 
   const beginDragFromVertex = (mesh: Mesh, vertexIndex: number) => {
+    dragStartSnapshotRef.current = captureSnapshot();
     const geometry = mesh.geometry as BufferGeometry;
     const pos = geometry.getAttribute("position");
     const nearest = {
@@ -529,6 +670,7 @@ function EditableMeshPrimitive({
     denseBinding: { a: number; b: number; c: number; wa: number; wb: number; wc: number },
     localDensePoint: Vector3,
   ) => {
+    dragStartSnapshotRef.current = captureSnapshot();
     const geometry = mesh.geometry as BufferGeometry;
     const pos = geometry.getAttribute("position");
     const world = mesh.localToWorld(localDensePoint.clone());
@@ -749,6 +891,7 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
   const [dragDelta, setDragDelta] = useState<[number, number, number] | null>(null);
   const exportObjectRef = useRef<Group | null>(null);
   const navOverrideRef = useRef(false);
+  const axisIndicatorRef = useRef<AxisCornerHandle>(null);
 
   useEffect(() => {
     if (!controlsRef.current) return;
@@ -842,11 +985,15 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
         {pointDistanceLabel ? <div>Point distance: {pointDistanceLabel}</div> : null}
         {dragDelta ? <div>Move delta: {formatLength(Math.hypot(...dragDelta), unit)}</div> : null}
       </HudPanel>
+      <div className="axis-corner-indicator" aria-hidden="true">
+        <AxisCornerIndicator ref={axisIndicatorRef} />
+      </div>
       <Canvas gl={{ antialias: true, alpha: true }} camera={{ position: [8, 6, 8], fov: 45, near: 0.01, far: 2000 }} dpr={[1, 2]}>
         <ambientLight intensity={0.55} />
         <directionalLight position={[8, 14, 10]} intensity={0.75} />
         <InfiniteGrid />
         <AxisGizmo />
+        <AxisCameraSync handle={axisIndicatorRef} />
         <ModelStage recenterKey={modelUrl ?? null}>
           {modelUrl ? (
             <Suspense fallback={null}>

@@ -40,6 +40,16 @@ class ArtifactRegistryService:
         records.sort(key=lambda item: float(item.get("created_at_epoch", 0.0)), reverse=True)
         return records
 
+    def save_compile_artifact(self, user_id: str, job_id: str, output: dict | None) -> tuple[str, str | None]:
+        payload = self._build_record(user_id=user_id.strip(), job_id=job_id, output=output)
+        stored, error_msg = self._write_remote_replace_user(user_id=user_id.strip(), payload=payload)
+        if not stored:
+            self._write_local_replace_user(user_id=user_id.strip(), payload=payload)
+            if error_msg:
+                return "local", f"Supabase save failed; saved locally instead. {error_msg}"
+            return "local", "Supabase not configured; saved locally instead."
+        return "supabase", None
+
     def _build_record(self, user_id: str, job_id: str, output: dict | None) -> dict[str, Any]:
         output = output or {}
         now = time.time()
@@ -70,6 +80,32 @@ class ArtifactRegistryService:
             with httpx.Client(timeout=15.0) as client:
                 response = client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
+            return True, None
+        except Exception as exc:
+            return False, str(exc)
+
+    def _write_remote_replace_user(self, user_id: str, payload: dict[str, Any]) -> tuple[bool, str | None]:
+        base_url = settings.supabase_url.strip().rstrip("/")
+        service_key = settings.supabase_service_role_key.strip()
+        table = settings.supabase_artifacts_table.strip()
+        if not base_url or not service_key or not table:
+            return False, None
+        url = f"{base_url}/rest/v1/{table}"
+        base_headers = {
+            "apikey": service_key,
+            "Authorization": f"Bearer {service_key}",
+        }
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                delete_resp = client.delete(url, headers=base_headers, params={"user_id": f"eq.{user_id}"})
+                delete_resp.raise_for_status()
+                insert_headers = {
+                    **base_headers,
+                    "Content-Type": "application/json",
+                    "Prefer": "return=minimal",
+                }
+                insert_resp = client.post(url, headers=insert_headers, json=payload)
+                insert_resp.raise_for_status()
             return True, None
         except Exception as exc:
             return False, str(exc)
@@ -119,6 +155,14 @@ class ArtifactRegistryService:
                     and item.get("compile_job_id") == payload.get("compile_job_id")
                 )
             ]
+            self._local_records.append(payload)
+            serialized = list(self._local_records)
+        self._local_path.parent.mkdir(parents=True, exist_ok=True)
+        self._local_path.write_text(json.dumps(serialized, indent=2), encoding="utf-8")
+
+    def _write_local_replace_user(self, user_id: str, payload: dict[str, Any]) -> None:
+        with self._lock:
+            self._local_records = [item for item in self._local_records if item.get("user_id") != user_id]
             self._local_records.append(payload)
             serialized = list(self._local_records)
         self._local_path.parent.mkdir(parents=True, exist_ok=True)

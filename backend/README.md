@@ -42,4 +42,7 @@ create index if not exists compile_artifacts_user_id_idx
 API flow:
 
 - Include `user_id` in `POST /compile` request body.
+- Save manually when user clicks Save: `POST /users/{user_id}/artifacts/save` with `compile_job_id`.
 - Fetch saved artifacts via `GET /users/{user_id}/artifacts`.
+
+Note: Save endpoint currently replaces prior saved rows for that user, keeping one saved model entry.

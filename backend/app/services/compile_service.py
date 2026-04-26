@@ -214,16 +214,6 @@ class CompileService:
             if cancelled_after_compile:
                 self._save_jobs_snapshot()
                 return
-            if self._artifact_registry_service is not None:
-                saved_to, save_error = self._artifact_registry_service.record_compile_artifact(
-                    user_id=user_id,
-                    job_id=job_id,
-                    output=output,
-                )
-                if save_error:
-                    warnings.append(save_error)
-                elif saved_to == "supabase":
-                    warnings.append("Artifact linked to user and saved to Supabase.")
             self._save_jobs_snapshot()
 
     def get_job(self, job_id: str) -> dict | None:
