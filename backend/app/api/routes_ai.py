@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import ai_service, compile_service, session_service
+from app.api.deps import ai_service, chat_history_service, compile_service, session_service
 from app.schemas.compile import CompileRequest
 from app.services.code_change_service import apply_ai_code_change
 from app.schemas.ai import (
@@ -43,6 +43,8 @@ async def chat(payload: ChatRequest) -> ChatResponse:
 
     compile_job_id: str | None = None
     compile_status: str | None = None
+    predicted_model_url: str | None = None
+    predicted_preview_url: str | None = None
     if code_change.applied:
         compile_job_id = compile_service.create_job(
             CompileRequest(
@@ -51,6 +53,29 @@ async def chat(payload: ChatRequest) -> ChatResponse:
             )
         )
         compile_status = "queued"
+        predicted_model_url = f"/artifacts/{compile_job_id}/model.stl"
+        predicted_preview_url = f"/artifacts/{compile_job_id}/preview.png"
+
+    latest_user_message = next(
+        (msg for msg in reversed(payload.messages) if msg.role == "user" and msg.content.strip()),
+        None,
+    )
+    if latest_user_message:
+        chat_history_service.record_message(
+            user_id=payload.user_id,
+            chat_id=payload.session_id,
+            role="user",
+            content=latest_user_message.content,
+        )
+    chat_history_service.record_message(
+        user_id=payload.user_id,
+        chat_id=payload.session_id,
+        role="assistant",
+        content=response,
+        compile_job_id=compile_job_id,
+        model_url=predicted_model_url,
+        preview_url=predicted_preview_url,
+    )
 
     return ChatResponse(
         provider=provider,

@@ -60,6 +60,11 @@ class CompileService:
             three_mf_path = tmp_path / "model.3mf"
             preview_path = tmp_path / "preview.png"
             scad_path.write_text(source_code, encoding="utf-8")
+            source_len = len(source_code)
+            is_heavy_source = (
+                settings.compile_skip_3mf_preview_for_heavy
+                and source_len >= settings.compile_heavy_source_threshold_chars
+            )
 
             if self._is_cancelled(job_id):
                 self._mark_cancelled(job_id)
@@ -107,62 +112,67 @@ class CompileService:
                 )
                 return
 
-            three_mf_process = self._spawn_openscad_process(
-                [
-                    settings.openscad_bin,
-                    "-o",
-                    str(three_mf_path),
-                    str(scad_path),
-                ]
-            )
-            if isinstance(three_mf_process, Exception):
-                warnings = [f"3MF generation skipped: {three_mf_process}"]
-            else:
-                warnings = []
-                self._set_process(job_id, three_mf_process)
-                try:
-                    _, three_mf_stderr = three_mf_process.communicate(
-                        timeout=settings.compile_timeout_sec
-                    )
-                    if three_mf_process.returncode != 0 and three_mf_stderr.strip():
-                        warnings.append(f"3MF generation warning: {three_mf_stderr.strip()}")
-                except subprocess.TimeoutExpired:
-                    three_mf_process.kill()
-                    warnings.append("3MF generation timed out.")
-                finally:
-                    self._clear_process(job_id)
-
-            png_process = self._spawn_openscad_process(
-                [
-                    settings.openscad_bin,
-                    "--render",
-                    "--viewall",
-                    "--imgsize",
-                    "512,512",
-                    "-o",
-                    str(preview_path),
-                    str(scad_path),
-                ]
-            )
+            warnings: list[str] = []
             preview_generated = False
-            if isinstance(png_process, Exception):
-                warnings.append(f"Preview generation skipped: {png_process}")
+            if is_heavy_source:
+                warnings.append(
+                    "Heavy model detected; skipped 3MF and preview generation for faster compile."
+                )
             else:
-                self._set_process(job_id, png_process)
-                try:
-                    _, png_stderr = png_process.communicate(
-                        timeout=settings.compile_timeout_sec
-                    )
-                    preview_generated = png_process.returncode == 0 and preview_path.exists()
-                    if png_process.returncode != 0 and png_stderr.strip():
-                        warnings.append(
-                            f"Preview generation warning: {png_stderr.strip()}"
+                three_mf_process = self._spawn_openscad_process(
+                    [
+                        settings.openscad_bin,
+                        "-o",
+                        str(three_mf_path),
+                        str(scad_path),
+                    ]
+                )
+                if isinstance(three_mf_process, Exception):
+                    warnings.append(f"3MF generation skipped: {three_mf_process}")
+                else:
+                    self._set_process(job_id, three_mf_process)
+                    try:
+                        _, three_mf_stderr = three_mf_process.communicate(
+                            timeout=settings.compile_timeout_sec
                         )
-                except subprocess.TimeoutExpired:
-                    png_process.kill()
-                    warnings.append("Preview generation timed out.")
-                finally:
-                    self._clear_process(job_id)
+                        if three_mf_process.returncode != 0 and three_mf_stderr.strip():
+                            warnings.append(f"3MF generation warning: {three_mf_stderr.strip()}")
+                    except subprocess.TimeoutExpired:
+                        three_mf_process.kill()
+                        warnings.append("3MF generation timed out.")
+                    finally:
+                        self._clear_process(job_id)
+
+                png_process = self._spawn_openscad_process(
+                    [
+                        settings.openscad_bin,
+                        "--render",
+                        "--viewall",
+                        "--imgsize",
+                        "512,512",
+                        "-o",
+                        str(preview_path),
+                        str(scad_path),
+                    ]
+                )
+                if isinstance(png_process, Exception):
+                    warnings.append(f"Preview generation skipped: {png_process}")
+                else:
+                    self._set_process(job_id, png_process)
+                    try:
+                        _, png_stderr = png_process.communicate(
+                            timeout=settings.compile_timeout_sec
+                        )
+                        preview_generated = png_process.returncode == 0 and preview_path.exists()
+                        if png_process.returncode != 0 and png_stderr.strip():
+                            warnings.append(
+                                f"Preview generation warning: {png_stderr.strip()}"
+                            )
+                    except subprocess.TimeoutExpired:
+                        png_process.kill()
+                        warnings.append("Preview generation timed out.")
+                    finally:
+                        self._clear_process(job_id)
 
             output = {
                 "engine": "openscad-cli",

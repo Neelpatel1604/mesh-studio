@@ -44,5 +44,28 @@ API flow:
 - Include `user_id` in `POST /compile` request body.
 - Save manually when user clicks Save: `POST /users/{user_id}/artifacts/save` with `compile_job_id`.
 - Fetch saved artifacts via `GET /users/{user_id}/artifacts`.
+- Chat history by chat ID:
+  - `GET /chat-history?user_id=...` (list chats)
+  - `GET /chat-history/{chat_id}?user_id=...` (message timeline)
 
-Note: Save endpoint currently replaces prior saved rows for that user, keeping one saved model entry.
+Note: Save endpoint now appends a new row only when the saved model changed from the latest saved row.
+
+Suggested chat history table:
+
+```sql
+create table if not exists public.chat_messages (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null,
+  chat_id text not null,
+  role text not null,
+  content text not null,
+  compile_job_id text,
+  model_url text,
+  preview_url text,
+  created_at timestamptz not null default now(),
+  created_at_epoch double precision
+);
+
+create index if not exists chat_messages_user_chat_created_idx
+  on public.chat_messages (user_id, chat_id, created_at asc);
+```

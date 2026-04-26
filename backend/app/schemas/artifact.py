@@ -21,6 +21,11 @@ class SaveUserArtifactRequest(BaseModel):
     compile_job_id: str
 
 
+class SaveUploadedArtifactRequest(BaseModel):
+    file_id: str
+    file_url: str
+
+
 class SaveUserArtifactResponse(BaseModel):
     user_id: str
     compile_job_id: str

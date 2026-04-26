@@ -2,6 +2,7 @@
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Mic, Redo2, Save, Square, Trash2, Undo2 } from "lucide-react";
+import Link from "next/link";
 import { EditorViewportCanvas } from "./components/viewport/EditorViewportCanvas";
 import { DisplayControls } from "./components/ui/DisplayControls";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
@@ -47,6 +48,8 @@ type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
 
 const DEFAULT_SESSION_ID = "default";
 const LOCAL_USER_ID_KEY = "mesh_studio_user_id";
+const DEFAULT_STL_ROTATION: [number, number, number] = [-1.57079632679, 0, 0];
+const DEFAULT_MODEL_ROTATION: [number, number, number] = [0, 0, 0];
 
 const getOrCreateLocalUserId = () => {
   if (typeof window === "undefined") {
@@ -61,7 +64,19 @@ const getOrCreateLocalUserId = () => {
   return generated;
 };
 
-export default function App() {
+type AppProps = {
+  initialSessionId?: string;
+  initialModelUrl?: string | null;
+  initialCompileStatus?: string | null;
+  initialModelRotation?: [number, number, number] | null;
+};
+
+export default function App({
+  initialSessionId = DEFAULT_SESSION_ID,
+  initialModelUrl = null,
+  initialCompileStatus = null,
+  initialModelRotation = null,
+}: AppProps) {
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<ChatEntry[]>([
     {
@@ -97,12 +112,12 @@ export default function App() {
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const testFileInputRef = useRef<HTMLInputElement | null>(null);
-  const testModelObjectUrlRef = useRef<string | null>(null);
 
   const apiBase = useMemo(
     () => process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000",
     [],
   );
+  const sessionId = initialSessionId.trim() || DEFAULT_SESSION_ID;
 
   useEffect(() => {
     setUserId(getOrCreateLocalUserId());
@@ -141,7 +156,7 @@ export default function App() {
   useEffect(() => {
     const loadEditorState = async () => {
       try {
-        const response = await fetch(`${apiBase}/sessions/${DEFAULT_SESSION_ID}/editor-state`);
+        const response = await fetch(`${apiBase}/sessions/${sessionId}/editor-state`);
         if (!response.ok) {
           return;
         }
@@ -156,7 +171,28 @@ export default function App() {
       }
     };
     void loadEditorState();
-  }, [apiBase]);
+  }, [apiBase, sessionId]);
+
+  useEffect(() => {
+    if (!initialModelUrl) {
+      return;
+    }
+    setCompileModelUrl(initialModelUrl);
+    if (initialModelRotation && initialModelRotation.length === 3) {
+      setCompileModelRotation(initialModelRotation);
+    } else {
+      const normalizedUrl = initialModelUrl.toLowerCase();
+      if (normalizedUrl.includes(".stl")) {
+        setCompileModelRotation(DEFAULT_STL_ROTATION);
+      } else {
+        setCompileModelRotation(DEFAULT_MODEL_ROTATION);
+      }
+    }
+    setCompilePreviewUrl(null);
+    setLatestCompileJobId(null);
+    setError(null);
+    setCompileStatus(initialCompileStatus ?? "loaded artifact model");
+  }, [initialCompileStatus, initialModelRotation, initialModelUrl]);
 
   const extractColorHintFromScad = (scad?: string) => {
     if (!scad) {
@@ -176,7 +212,7 @@ export default function App() {
   const pollCompileJob = async (jobId: string) => {
     setCompileStatus("queued");
     const terminalStates = new Set(["completed", "failed", "cancelled"]);
-    for (let i = 0; i < 120; i += 1) {
+    for (let i = 0; i < 800; i += 1) {
       const resp = await fetch(`${apiBase}/compile/${jobId}`);
       if (!resp.ok) {
         setCompileStatus("failed");
@@ -211,10 +247,10 @@ export default function App() {
         }
         return;
       }
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
-    setCompileStatus("failed");
-    setError("Compile polling timed out.");
+    setCompileStatus("still running");
+    setError("Compile is taking longer than usual. It is still running; please check back shortly.");
   };
 
   const handleExportEditedModel = () => {
@@ -275,7 +311,7 @@ export default function App() {
       clearTimeout(autosaveTimerRef.current);
     }
     autosaveTimerRef.current = setTimeout(() => {
-      void fetch(`${apiBase}/sessions/${DEFAULT_SESSION_ID}/editor-state`, {
+      void fetch(`${apiBase}/sessions/${sessionId}/editor-state`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -290,6 +326,7 @@ export default function App() {
   }, []);
   const handleLoadPrebuiltModel = () => {
     setCompileModelUrl(`/premade/cube.stl?t=${Date.now()}`);
+    setCompileModelRotation(DEFAULT_STL_ROTATION);
     setCompileStatus("loaded prebuilt model");
     setError(null);
   };
@@ -298,25 +335,72 @@ export default function App() {
     testFileInputRef.current?.click();
   };
 
-  const triggerEditorAction = (action: "undo" | "redo" | "delete") => {
+  const triggerEditorAction = (action: "undo" | "redo") => {
     window.dispatchEvent(new CustomEvent(`meshstudio:${action}`));
   };
 
-  const handleTestFilePicked = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleDeleteModel = () => {
+    setCompileModelUrl(null);
+    setCompilePreviewUrl(null);
+    setLatestCompileJobId(null);
+    setCompileStatus("model removed");
+    setSaveStatus(null);
+    setError(null);
+    setExportEditedMesh(null);
+  };
+
+  const handleTestFilePicked = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) {
       return;
     }
-    if (testModelObjectUrlRef.current) {
-      URL.revokeObjectURL(testModelObjectUrlRef.current);
-      testModelObjectUrlRef.current = null;
+    try {
+      setError(null);
+      setCompileStatus("uploading model...");
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch(`${apiBase}/uploads/meshes`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        let detail = "";
+        try {
+          const body = (await response.json()) as { detail?: string };
+          detail = body.detail ? `: ${body.detail}` : "";
+        } catch {
+          // Ignore non-JSON error body
+        }
+        throw new Error(`Mesh upload failed with status ${response.status}${detail}`);
+      }
+      const body = (await response.json()) as { file_id: string; file_url: string; filename?: string };
+      setCompileModelUrl(`${apiBase}${body.file_url}?t=${Date.now()}`);
+      setCompileModelRotation(DEFAULT_STL_ROTATION);
+      setCompilePreviewUrl(null);
+      setLatestCompileJobId(null);
+      setSaveStatus("saving...");
+      setCompileStatus(`imported model: ${body.filename ?? file.name}`);
+      const saveUploadResp = await fetch(`${apiBase}/users/${userId}/artifacts/save-upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          file_id: body.file_id,
+          file_url: body.file_url,
+        }),
+      });
+      if (saveUploadResp.ok) {
+        const saveBody = (await saveUploadResp.json()) as { message?: string };
+        setSaveStatus(saveBody.message ?? "saved");
+      } else {
+        setSaveStatus("save failed");
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to import STL.";
+      setCompileStatus("import failed");
+      setError(message);
+    } finally {
+      event.target.value = "";
     }
-    const objectUrl = URL.createObjectURL(file);
-    testModelObjectUrlRef.current = objectUrl;
-    setCompileModelUrl(objectUrl);
-    setCompileStatus(`loaded test model: ${file.name}`);
-    setError(null);
-    event.target.value = "";
   };
 
   useEffect(() => {
@@ -334,10 +418,6 @@ export default function App() {
         clearTimeout(autosaveTimerRef.current);
       }
       recognitionRef.current?.stop();
-      if (testModelObjectUrlRef.current) {
-        URL.revokeObjectURL(testModelObjectUrlRef.current);
-        testModelObjectUrlRef.current = null;
-      }
     };
   }, []);
 
@@ -364,7 +444,7 @@ export default function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          session_id: DEFAULT_SESSION_ID,
+          session_id: sessionId,
           user_id: userId,
           generation_mode: generationMode,
           current_code: generationMode === "text_to_3d" ? null : undefined,
@@ -579,9 +659,9 @@ export default function App() {
             <button
               type="button"
               className="toolbar-btn"
-              onClick={() => triggerEditorAction("delete")}
-              title="Delete selected"
-              aria-label="Delete selected"
+              onClick={handleDeleteModel}
+              title="Delete current model"
+              aria-label="Delete current model"
             >
               <Trash2 size={14} />
             </button>
@@ -637,6 +717,13 @@ export default function App() {
       <aside className="chat-panel">
         <header className="chat-header">
           AI Chat
+          <Link
+            href={`/chat-history/${sessionId}?user_id=${encodeURIComponent(userId)}`}
+            className="chat-refresh"
+            title="Open chat history"
+          >
+            History
+          </Link>
           <button
             type="button"
             className="chat-refresh chat-save-btn chat-header-action"

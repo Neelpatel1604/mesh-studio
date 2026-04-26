@@ -4,6 +4,7 @@ from app.api.deps import artifact_registry_service, compile_service
 from app.schemas.artifact import (
     SaveUserArtifactRequest,
     SaveUserArtifactResponse,
+    SaveUploadedArtifactRequest,
     UserArtifactListResponse,
     UserArtifactRecord,
 )
@@ -38,6 +39,27 @@ def save_user_artifact(user_id: str, payload: SaveUserArtifactRequest) -> SaveUs
     return SaveUserArtifactResponse(
         user_id=user_id,
         compile_job_id=payload.compile_job_id,
+        saved_to=saved_to,
+        message=message,
+    )
+
+
+@router.post("/{user_id}/artifacts/save-upload", response_model=SaveUserArtifactResponse)
+def save_uploaded_artifact(user_id: str, payload: SaveUploadedArtifactRequest) -> SaveUserArtifactResponse:
+    upload_job_id = f"upload:{payload.file_id}"
+    saved_to, error_msg = artifact_registry_service.save_compile_artifact(
+        user_id=user_id,
+        job_id=upload_job_id,
+        output={
+            "stl_url": payload.file_url,
+            "model_3mf_url": None,
+            "preview_url": None,
+        },
+    )
+    message = error_msg or "Uploaded model saved successfully."
+    return SaveUserArtifactResponse(
+        user_id=user_id,
+        compile_job_id=upload_job_id,
         saved_to=saved_to,
         message=message,
     )
