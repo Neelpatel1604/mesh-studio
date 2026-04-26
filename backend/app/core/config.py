@@ -17,9 +17,12 @@ class Settings(BaseSettings):
     elevenlabs_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"
     openscad_bin: str = "openscad"
     compile_timeout_sec: int = 1500
+    compile_heavy_source_threshold_chars: int = 3000
+    compile_skip_3mf_preview_for_heavy: bool = True
     supabase_url: str = ""
     supabase_service_role_key: str = ""
     supabase_artifacts_table: str = "compile_artifacts"
+    supabase_chat_messages_table: str = "chat_messages"
 
     model_config = SettingsConfigDict(
         env_file=(".env", "app/.env"),

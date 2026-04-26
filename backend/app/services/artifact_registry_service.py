@@ -42,12 +42,16 @@ class ArtifactRegistryService:
 
     def save_compile_artifact(self, user_id: str, job_id: str, output: dict | None) -> tuple[str, str | None]:
         payload = self._build_record(user_id=user_id.strip(), job_id=job_id, output=output)
-        stored, error_msg = self._write_remote_replace_user(user_id=user_id.strip(), payload=payload)
+        stored, error_msg, inserted = self._write_remote_if_changed(user_id=user_id.strip(), payload=payload)
         if not stored:
-            self._write_local_replace_user(user_id=user_id.strip(), payload=payload)
+            inserted_local = self._write_local_if_changed(user_id=user_id.strip(), payload=payload)
             if error_msg:
                 return "local", f"Supabase save failed; saved locally instead. {error_msg}"
-            return "local", "Supabase not configured; saved locally instead."
+            if inserted_local:
+                return "local", "Supabase not configured; saved locally instead."
+            return "local", "No change detected; existing saved row already matches."
+        if not inserted:
+            return "supabase", "No change detected; existing saved row already matches."
         return "supabase", None
 
     def _build_record(self, user_id: str, job_id: str, output: dict | None) -> dict[str, Any]:
@@ -84,12 +88,12 @@ class ArtifactRegistryService:
         except Exception as exc:
             return False, str(exc)
 
-    def _write_remote_replace_user(self, user_id: str, payload: dict[str, Any]) -> tuple[bool, str | None]:
+    def _write_remote_if_changed(self, user_id: str, payload: dict[str, Any]) -> tuple[bool, str | None, bool]:
         base_url = settings.supabase_url.strip().rstrip("/")
         service_key = settings.supabase_service_role_key.strip()
         table = settings.supabase_artifacts_table.strip()
         if not base_url or not service_key or not table:
-            return False, None
+            return False, None, False
         url = f"{base_url}/rest/v1/{table}"
         base_headers = {
             "apikey": service_key,
@@ -97,8 +101,22 @@ class ArtifactRegistryService:
         }
         try:
             with httpx.Client(timeout=15.0) as client:
-                delete_resp = client.delete(url, headers=base_headers, params={"user_id": f"eq.{user_id}"})
-                delete_resp.raise_for_status()
+                latest_resp = client.get(
+                    url,
+                    headers=base_headers,
+                    params={
+                        "select": "user_id,compile_job_id,stl_url,model_3mf_url,preview_url,status",
+                        "user_id": f"eq.{user_id}",
+                        "order": "created_at.desc",
+                        "limit": "1",
+                    },
+                )
+                latest_resp.raise_for_status()
+                latest_data = latest_resp.json()
+                if isinstance(latest_data, list) and latest_data:
+                    latest = latest_data[0]
+                    if self._records_equivalent(latest, payload):
+                        return True, None, False
                 insert_headers = {
                     **base_headers,
                     "Content-Type": "application/json",
@@ -106,9 +124,9 @@ class ArtifactRegistryService:
                 }
                 insert_resp = client.post(url, headers=insert_headers, json=payload)
                 insert_resp.raise_for_status()
-            return True, None
+            return True, None, True
         except Exception as exc:
-            return False, str(exc)
+            return False, str(exc), False
 
     def _read_remote(self, user_id: str) -> list[dict[str, Any]] | None:
         base_url = settings.supabase_url.strip().rstrip("/")
@@ -167,3 +185,24 @@ class ArtifactRegistryService:
             serialized = list(self._local_records)
         self._local_path.parent.mkdir(parents=True, exist_ok=True)
         self._local_path.write_text(json.dumps(serialized, indent=2), encoding="utf-8")
+
+    def _write_local_if_changed(self, user_id: str, payload: dict[str, Any]) -> bool:
+        inserted = True
+        with self._lock:
+            user_records = [item for item in self._local_records if item.get("user_id") == user_id]
+            user_records.sort(key=lambda item: float(item.get("created_at_epoch", 0.0)), reverse=True)
+            if user_records and self._records_equivalent(user_records[0], payload):
+                inserted = False
+            else:
+                self._local_records.append(payload)
+            serialized = list(self._local_records)
+        self._local_path.parent.mkdir(parents=True, exist_ok=True)
+        self._local_path.write_text(json.dumps(serialized, indent=2), encoding="utf-8")
+        return inserted
+
+    def _records_equivalent(self, a: dict[str, Any], b: dict[str, Any]) -> bool:
+        keys = ("user_id", "compile_job_id", "stl_url", "model_3mf_url", "preview_url", "status")
+        for key in keys:
+            if a.get(key) != b.get(key):
+                return False
+        return True

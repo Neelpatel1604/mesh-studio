@@ -1,10 +1,11 @@
 import { Html, Line, OrbitControls } from "@react-three/drei";
 import { Canvas, ThreeEvent, useFrame, useLoader, useThree } from "@react-three/fiber";
-import { memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Material, Vector3Tuple } from "three";
 import { Box3, BufferAttribute, BufferGeometry, Group, Matrix4, Mesh, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
 import { STLExporter, STLLoader, ThreeMFLoader } from "three-stdlib";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import { LocateFixed } from "lucide-react";
 import { HudPanel } from "../ui/HudPanel";
 import { AxisGizmo } from "./AxisGizmo";
 import { AxisCameraSync, AxisCornerIndicator, type AxisCornerHandle } from "./AxisCornerIndicator";
@@ -16,7 +17,10 @@ import { ModelStage } from "./ModelStage";
 type ViewportCanvasProps = {
   modelUrl?: string | null;
   modelRotationEuler?: [number, number, number];
+  modelPosition?: [number, number, number];
+  modelScale?: [number, number, number];
   modelColor?: string;
+  modelSectionColors?: Record<string, string>;
   activeTool: EditorTool;
   unit: Unit;
   displayMode: DisplayMode;
@@ -25,6 +29,7 @@ type ViewportCanvasProps = {
   persistedEditorState?: PersistedEditorState | null;
   onEditorStateChange?: (state: PersistedEditorState) => void;
   onExportMeshReady?: (exporter: (() => Blob | null) | null) => void;
+  onModelSectionsChange?: (sections: Array<{ id: string; label: string }>) => void;
   clearMeasureNonce?: number;
 };
 
@@ -54,6 +59,8 @@ function EditableMeshPrimitive({
   object,
   activeTool,
   modelRotationEuler,
+  modelPosition,
+  modelScale,
   displayMode,
   unit,
   measureSubtool,
@@ -70,6 +77,8 @@ function EditableMeshPrimitive({
   object: Group;
   activeTool: EditorTool;
   modelRotationEuler: [number, number, number];
+  modelPosition: [number, number, number];
+  modelScale: [number, number, number];
   displayMode: DisplayMode;
   unit: Unit;
   measureSubtool: MeasureSubtool;
@@ -748,7 +757,14 @@ function EditableMeshPrimitive({
   };
 
   return (
-    <group ref={groupRef} rotation={modelRotationEuler} onPointerDown={handlePointerDown} onPointerUp={handlePointerUp}>
+    <group
+      ref={groupRef}
+      rotation={modelRotationEuler}
+      position={modelPosition}
+      scale={modelScale}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+    >
       <primitive object={object} />
       {grabPointOverlays.map((overlay) => (
         <points
@@ -808,7 +824,10 @@ function EditableMeshPrimitive({
 type CompiledAssetProps = {
   modelUrl: string;
   modelRotationEuler: [number, number, number];
+  modelPosition: [number, number, number];
+  modelScale: [number, number, number];
   modelColor: string;
+  modelSectionColors: Record<string, string>;
   activeTool: EditorTool;
   unit: Unit;
   displayMode: DisplayMode;
@@ -823,53 +842,88 @@ type CompiledAssetProps = {
   setInteractionOwner: (owner: "camera" | "tool") => void;
   onMeasurePoint: (point: [number, number, number]) => void;
   onObjectReady?: (object: Group | null) => void;
+  onModelSectionsChange?: (sections: Array<{ id: string; label: string }>) => void;
 };
 
 function CompiledStlAsset(props: CompiledAssetProps) {
-  const { onObjectReady, ...editableProps } = props;
+  const { onObjectReady, onModelSectionsChange, ...editableProps } = props;
   const stlGeometry = useLoader(STLLoader, props.modelUrl) as BufferGeometry;
   const object = useMemo(() => {
+    const sectionId = "stl-main";
+    const sectionColor = props.modelSectionColors[sectionId] ?? props.modelColor;
     const g = new Group();
-    const m = new Mesh(stlGeometry.clone(), new MeshStandardMaterial({ color: props.modelColor, metalness: 0.2, roughness: 0.6 }));
+    const m = new Mesh(
+      stlGeometry.clone(),
+      new MeshStandardMaterial({ color: sectionColor, metalness: 0.2, roughness: 0.6 }),
+    );
+    m.name = "STL Main";
+    m.userData.sectionId = sectionId;
     g.add(m);
     return g;
-  }, [props.modelColor, stlGeometry]);
+  }, [props.modelColor, props.modelSectionColors, stlGeometry]);
   useEffect(() => {
     onObjectReady?.(object);
     return () => onObjectReady?.(null);
   }, [object, onObjectReady]);
+  useEffect(() => {
+    onModelSectionsChange?.([{ id: "stl-main", label: "STL Main" }]);
+    return () => onModelSectionsChange?.([]);
+  }, [onModelSectionsChange]);
   return <EditableMeshPrimitive object={object} {...editableProps} />;
 }
 
 function Compiled3MFAsset(props: CompiledAssetProps) {
-  const { onObjectReady, ...editableProps } = props;
+  const { onObjectReady, onModelSectionsChange, ...editableProps } = props;
   const threemfObject = useLoader(ThreeMFLoader, props.modelUrl) as Group;
   const object = useMemo(() => {
     const g = threemfObject.clone(true) as Group;
+    let meshIndex = 0;
     g.traverse((node) => {
       const mesh = node as Mesh;
       if (!mesh.isMesh) return;
       mesh.castShadow = true;
+      meshIndex += 1;
+      const sectionId = mesh.name?.trim() ? `mesh:${mesh.name}` : `mesh:${meshIndex}`;
+      const sectionColor = props.modelSectionColors[sectionId] ?? props.modelColor;
+      mesh.userData.sectionId = sectionId;
       const mat = mesh.material as Material | Material[] | undefined;
       const applyColor = (material: any) => {
-        if (material?.color?.set) material.color.set(props.modelColor);
+        if (material?.color?.set) material.color.set(sectionColor);
       };
       if (Array.isArray(mat)) mat.forEach(applyColor);
       else if (mat) applyColor(mat);
     });
     return g;
-  }, [props.modelColor, threemfObject]);
+  }, [props.modelColor, props.modelSectionColors, threemfObject]);
   useEffect(() => {
     onObjectReady?.(object);
     return () => onObjectReady?.(null);
   }, [object, onObjectReady]);
+  useEffect(() => {
+    const sections: Array<{ id: string; label: string }> = [];
+    object.traverse((node) => {
+      const mesh = node as Mesh;
+      if (!mesh.isMesh) return;
+      const sectionId = String(mesh.userData.sectionId ?? "");
+      if (!sectionId) return;
+      const label = mesh.name?.trim() ? mesh.name : sectionId.replace("mesh:", "Part ");
+      if (!sections.some((section) => section.id === sectionId)) {
+        sections.push({ id: sectionId, label });
+      }
+    });
+    onModelSectionsChange?.(sections);
+    return () => onModelSectionsChange?.([]);
+  }, [object, onModelSectionsChange]);
   return <EditableMeshPrimitive object={object} {...editableProps} />;
 }
 
 export const EditorViewportCanvas = memo(function EditorViewportCanvas({
   modelUrl,
   modelRotationEuler = [0, 0, 0],
+  modelPosition = [0, 0, 0],
+  modelScale = [1, 1, 1],
   modelColor = "#b5b5b5",
+  modelSectionColors = {},
   activeTool,
   unit,
   displayMode,
@@ -878,9 +932,11 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
   persistedEditorState,
   onEditorStateChange,
   onExportMeshReady,
+  onModelSectionsChange,
   clearMeasureNonce = 0,
 }: ViewportCanvasProps) {
   const controlsRef = useRef<OrbitControlsImpl>(null);
+  const lastAutoFitModelRef = useRef<string | null>(null);
   const [interactionOwner, setInteractionOwner] = useState<"camera" | "tool">("camera");
   const [selectedControlPoint, setSelectedControlPoint] = useState<EditorControlPoint>(null);
   const [editablePointCount, setEditablePointCount] = useState(0);
@@ -897,6 +953,65 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
     if (!controlsRef.current) return;
     controlsRef.current.enabled = interactionOwner === "camera";
   }, [interactionOwner]);
+
+  const fitViewToModel = useCallback(() => {
+    if (!modelUrl || !bounds || !controlsRef.current) {
+      return;
+    }
+    const controls = controlsRef.current;
+    const camera = controls.object;
+    const absScale: [number, number, number] = [
+      Math.abs(modelScale[0]),
+      Math.abs(modelScale[1]),
+      Math.abs(modelScale[2]),
+    ];
+    const scaledSize = new Vector3(
+      Math.max(1e-6, bounds.width * absScale[0]),
+      Math.max(1e-6, bounds.height * absScale[1]),
+      Math.max(1e-6, bounds.depth * absScale[2]),
+    );
+    const radius = scaledSize.length() * 0.5;
+    const fovRad =
+      "isPerspectiveCamera" in camera && camera.isPerspectiveCamera
+        ? (camera.fov * Math.PI) / 180
+        : (45 * Math.PI) / 180;
+    const aspect =
+      "isPerspectiveCamera" in camera && camera.isPerspectiveCamera
+        ? Math.max(0.2, camera.aspect)
+        : 1;
+    const vFov = Math.max(0.12, fovRad);
+    const hFov = 2 * Math.atan(Math.tan(vFov * 0.5) * aspect);
+    const fitDistanceHeight = radius / Math.tan(vFov * 0.5);
+    const fitDistanceWidth = radius / Math.tan(Math.max(0.08, hFov * 0.5));
+    const fitDistance = Math.max(10, fitDistanceHeight, fitDistanceWidth) * 1.35;
+    const target = new Vector3(
+      modelPosition[0],
+      modelPosition[1] + scaledSize.y * 0.5,
+      modelPosition[2],
+    );
+    const viewDir = camera.position.clone().sub(controls.target).normalize();
+    camera.position.copy(target.clone().add(viewDir.multiplyScalar(fitDistance)));
+    controls.target.copy(target);
+    controls.update();
+  }, [bounds, modelPosition, modelScale, modelUrl]);
+
+  useEffect(() => {
+    if (!modelUrl || !bounds || !controlsRef.current) {
+      return;
+    }
+    if (lastAutoFitModelRef.current === modelUrl) {
+      return;
+    }
+
+    fitViewToModel();
+    lastAutoFitModelRef.current = modelUrl;
+  }, [fitViewToModel, modelUrl]);
+
+  useEffect(() => {
+    if (!modelUrl) {
+      lastAutoFitModelRef.current = null;
+    }
+  }, [modelUrl]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -951,6 +1066,10 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
         return null;
       }
       const clone = source.clone(true);
+      // Bake current viewport transform into the exported STL.
+      clone.position.set(modelPosition[0], modelPosition[1], modelPosition[2]);
+      clone.rotation.set(modelRotationEuler[0], modelRotationEuler[1], modelRotationEuler[2]);
+      clone.scale.set(modelScale[0], modelScale[1], modelScale[2]);
       clone.updateMatrixWorld(true);
       const out = exporter.parse(clone, { binary: true }) as DataView | string;
       if (typeof out === "string") {
@@ -964,7 +1083,7 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
     };
     onExportMeshReady(buildBlob);
     return () => onExportMeshReady(null);
-  }, [modelUrl, onExportMeshReady]);
+  }, [modelPosition, modelRotationEuler, modelScale, modelUrl, onExportMeshReady]);
 
   const pointDistanceLabel = useMemo(() => {
     if (measurePoints.length !== 2) return null;
@@ -974,21 +1093,125 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
   return (
     <div className="viewport-canvas-wrap">
       <HudPanel className="viewport-hud">
-        <div>Tool: {activeTool}</div>
-        <div>Display: {displayMode}</div>
-        <div>Unit: {unit}</div>
-        {bounds ? <div>Bounds: {formatLength(bounds.width, unit)} / {formatLength(bounds.height, unit)} / {formatLength(bounds.depth, unit)}</div> : null}
-        {activeTool === "measure" ? <div>Measure mode: {measureSubtool === "point_to_point" ? "click two points" : "bounding dimensions"}</div> : null}
-        {activeTool === "edit" ? <div>Editable points: {editablePointCount}</div> : null}
-        {activeTool === "edit" && linkedVertexCount > 0 ? <div>Linked vertices moved: {linkedVertexCount}</div> : null}
-        {activeTool === "edit" && snapHint ? <div>Snap hint: {snapHint}</div> : null}
-        {pointDistanceLabel ? <div>Point distance: {pointDistanceLabel}</div> : null}
-        {dragDelta ? <div>Move delta: {formatLength(Math.hypot(...dragDelta), unit)}</div> : null}
+        <div className="viewport-hud-title">Viewport</div>
+        <div className="viewport-hud-row">
+          <span className="viewport-hud-label">Tool</span>
+          <strong className="viewport-hud-value">{activeTool}</strong>
+        </div>
+        <div className="viewport-hud-row">
+          <span className="viewport-hud-label">Display</span>
+          <strong className="viewport-hud-value">{displayMode}</strong>
+        </div>
+        <div className="viewport-hud-row">
+          <span className="viewport-hud-label">Unit</span>
+          <strong className="viewport-hud-value">{unit}</strong>
+        </div>
+        {bounds ? (
+          <>
+            <div className="viewport-hud-row">
+              <span className="viewport-hud-label">W</span>
+              <strong className="viewport-hud-value">{formatLength(bounds.width, unit)}</strong>
+            </div>
+            <div className="viewport-hud-row">
+              <span className="viewport-hud-label">H</span>
+              <strong className="viewport-hud-value">{formatLength(bounds.height, unit)}</strong>
+            </div>
+            <div className="viewport-hud-row">
+              <span className="viewport-hud-label">D</span>
+              <strong className="viewport-hud-value">{formatLength(bounds.depth, unit)}</strong>
+            </div>
+          </>
+        ) : null}
+        {activeTool === "measure" ? (
+          <div className="viewport-hud-row">
+            <span className="viewport-hud-label">Measure</span>
+            <strong className="viewport-hud-value">
+              {measureSubtool === "point_to_point" ? "click two points" : "bounding dimensions"}
+            </strong>
+          </div>
+        ) : null}
+        {activeTool === "edit" ? (
+          <div className="viewport-hud-row">
+            <span className="viewport-hud-label">Points</span>
+            <strong className="viewport-hud-value">{editablePointCount}</strong>
+          </div>
+        ) : null}
+        {activeTool === "edit" && linkedVertexCount > 0 ? (
+          <div className="viewport-hud-row">
+            <span className="viewport-hud-label">Linked</span>
+            <strong className="viewport-hud-value">{linkedVertexCount}</strong>
+          </div>
+        ) : null}
+        {activeTool === "edit" && snapHint ? (
+          <div className="viewport-hud-row">
+            <span className="viewport-hud-label">Snap</span>
+            <strong className="viewport-hud-value">{snapHint}</strong>
+          </div>
+        ) : null}
+        {pointDistanceLabel ? (
+          <div className="viewport-hud-row">
+            <span className="viewport-hud-label">Distance</span>
+            <strong className="viewport-hud-value">{pointDistanceLabel}</strong>
+          </div>
+        ) : null}
+        {dragDelta ? (
+          <div className="viewport-hud-row">
+            <span className="viewport-hud-label">Delta</span>
+            <strong className="viewport-hud-value">{formatLength(Math.hypot(...dragDelta), unit)}</strong>
+          </div>
+        ) : null}
       </HudPanel>
+      {activeTool === "measure" ? (
+        <div className="measure-panel" role="status" aria-live="polite">
+          <div className="measure-panel-title">Measure</div>
+          <div className="measure-panel-mode">
+            {measureSubtool === "point_to_point" ? "Point to Point" : "Bounding Dimensions"}
+          </div>
+          {measureSubtool === "point_to_point" ? (
+            <div className="measure-panel-values">
+              <div className="measure-panel-item">
+                <span>Points</span>
+                <strong>{measurePoints.length}/2</strong>
+              </div>
+              <div className="measure-panel-item">
+                <span>Distance</span>
+                <strong>{pointDistanceLabel ?? "Pick two points"}</strong>
+              </div>
+            </div>
+          ) : bounds ? (
+            <div className="measure-panel-values">
+              <div className="measure-panel-item">
+                <span>Width</span>
+                <strong>{formatLength(bounds.width, unit)}</strong>
+              </div>
+              <div className="measure-panel-item">
+                <span>Height</span>
+                <strong>{formatLength(bounds.height, unit)}</strong>
+              </div>
+              <div className="measure-panel-item">
+                <span>Depth</span>
+                <strong>{formatLength(bounds.depth, unit)}</strong>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {modelUrl ? (
+        <button
+          type="button"
+          className={`viewport-center-btn ${activeTool === "measure" ? "with-measure-panel" : ""}`}
+          onClick={fitViewToModel}
+          title="Go to center"
+          aria-label="Go to center"
+        >
+          <LocateFixed size={16} />
+          Center
+        </button>
+      ) : null}
       <div className="axis-corner-indicator" aria-hidden="true">
         <AxisCornerIndicator ref={axisIndicatorRef} />
       </div>
-      <Canvas gl={{ antialias: true, alpha: true }} camera={{ position: [8, 6, 8], fov: 45, near: 0.01, far: 2000 }} dpr={[1, 2]}>
+      <Canvas gl={{ antialias: true, alpha: true }} camera={{ position: [8, 6, 8], fov: 45, near: 0.01, far: 50000 }} dpr={[1, 2]}>
         <ambientLight intensity={0.55} />
         <directionalLight position={[8, 14, 10]} intensity={0.75} />
         <InfiniteGrid />
@@ -1001,7 +1224,10 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
                 <Compiled3MFAsset
                   modelUrl={modelUrl}
                   modelRotationEuler={modelRotationEuler}
+                  modelPosition={modelPosition}
+                  modelScale={modelScale}
                   modelColor={modelColor}
+                  modelSectionColors={modelSectionColors}
                   activeTool={activeTool}
                   unit={unit}
                   displayMode={displayMode}
@@ -1018,12 +1244,16 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
                   onObjectReady={(object) => {
                     exportObjectRef.current = object;
                   }}
+                  onModelSectionsChange={onModelSectionsChange}
                 />
               ) : (
                 <CompiledStlAsset
                   modelUrl={modelUrl}
                   modelRotationEuler={modelRotationEuler}
+                  modelPosition={modelPosition}
+                  modelScale={modelScale}
                   modelColor={modelColor}
+                  modelSectionColors={modelSectionColors}
                   activeTool={activeTool}
                   unit={unit}
                   displayMode={displayMode}
@@ -1040,6 +1270,7 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
                   onObjectReady={(object) => {
                     exportObjectRef.current = object;
                   }}
+                  onModelSectionsChange={onModelSectionsChange}
                 />
               )}
             </Suspense>
@@ -1051,7 +1282,7 @@ export const EditorViewportCanvas = memo(function EditorViewportCanvas({
           enableDamping
           dampingFactor={0.08}
           minDistance={0.05}
-          maxDistance={1200}
+          maxDistance={6000}
           minPolarAngle={-Infinity}
           maxPolarAngle={Infinity}
         />

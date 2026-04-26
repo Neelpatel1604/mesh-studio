@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.api.routes_ai import router as ai_router
 from app.api.routes_compile import router as compile_router
+from app.api.routes_chat_history import router as chat_history_router
 from app.api.routes_editor import router as editor_router
 from app.api.routes_sessions import router as sessions_router
 from app.api.routes_uploads import router as uploads_router
@@ -24,6 +25,7 @@ app.add_middleware(
 )
 
 app.include_router(ai_router)
+app.include_router(chat_history_router)
 app.include_router(compile_router)
 app.include_router(editor_router)
 app.include_router(sessions_router)
